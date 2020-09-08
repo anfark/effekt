@@ -78,7 +78,9 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def compilationUnit(mod: Module, core: ModuleDecl, dependencies: List[Document])(implicit C: Context): Document =
     pretty {
 
-      emptyline
+      "define" <+> "i64" <+> "@effektMain" <> "()" <+> braces(
+        "ret" <+> "i64" <+> "9"
+      )
 
     }
 
