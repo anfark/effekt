@@ -1,7 +1,7 @@
 package effekt.generator
 
 import effekt.context.Context
-import effekt.core._
+import effekt.machine._
 import effekt.symbols.Module
 import effekt.symbols.{ Name, Symbol }
 
@@ -43,10 +43,10 @@ class LLVM extends Generator {
     mod <- C.frontend(src)
     _ = C.checkMain(mod)
     deps = mod.dependencies.flatMap(dep => compile(dep))
-    core <- C.lower(src)
+    machine <- C.evenLower(src)
 
     llvmFile = llvmPath(mod)
-    result = LLVMPrinter.compilationUnit(mod, core, deps)
+    result = LLVMPrinter.compilationUnit(mod, machine, deps)
     _ = C.saveOutput(result.layout, llvmFile)
 
     objectFile = objectPath(mod)
@@ -64,8 +64,8 @@ class LLVM extends Generator {
    * Compiles only the given module, does not compile dependencies
    */
   def compile(mod: Module)(implicit C: Context): Option[Document] = for {
-    core <- C.lower(mod.source)
-    doc = LLVMPrinter.format(core)
+    machine <- C.evenLower(mod.source)
+    doc = LLVMPrinter.format(machine)
   } yield doc
 }
 
@@ -75,7 +75,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   val prelude = ""
 
-  def compilationUnit(mod: Module, core: ModuleDecl, dependencies: List[Document])(implicit C: Context): Document =
+  def compilationUnit(mod: Module, machine: ModuleDecl, dependencies: List[Document])(implicit C: Context): Document =
     pretty {
 
       "define" <+> "i64" <+> "@effektMain" <> "()" <+> braces(
@@ -86,8 +86,8 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def moduleFile(path: String): String = path.replace('/', '_') + ".ll"
 
-  def format(t: ModuleDecl)(implicit C: Context): Document =
-    pretty(module(t))
+  def format(machine: ModuleDecl)(implicit C: Context): Document =
+    pretty(module(machine))
 
   val emptyline: Doc = line <> line
 

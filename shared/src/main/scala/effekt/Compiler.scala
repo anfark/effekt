@@ -37,8 +37,9 @@ trait Compiler {
 
   // Backend phases
   // ==============
-  object transformer extends Transformer
+  object transformer extends core.Transformer
   object lifter extends LiftInference
+  object machiner extends machine.Transformer
 
   def generatorPhase(implicit C: Context) = C.config.generator() match {
     case "js"           => new effekt.generator.JavaScript
@@ -85,6 +86,14 @@ trait Compiler {
       core <- lower(source)
       lifted <- C.using(module = mod) { lifter(core) }
     } yield lifted
+  }
+
+  object evenLower extends SourceTask[machine.ModuleDecl]("evenlower") {
+    def run(source: Source)(implicit C: Context): Option[machine.ModuleDecl] = for {
+      mod <- frontend(source)
+      core <- lower(source)
+      machine <- C.using(module = mod) { machiner(core) }
+    } yield machine
   }
 
   object generate extends SourceTask[Document]("generate") {
