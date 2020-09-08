@@ -5,7 +5,7 @@ import effekt.core.{ LiftInference, Transformer }
 import effekt.namer.Namer
 import effekt.source.ModuleDecl
 import effekt.symbols.Module
-import effekt.generator.{ ChezSchemeCallCC, ChezSchemeLift, ChezSchemeMonadic, Generator, JavaScript, JavaScriptLift }
+import effekt.generator.{ ChezSchemeCallCC, ChezSchemeLift, ChezSchemeMonadic, Generator, JavaScript, JavaScriptLift, LLVM }
 import effekt.typer.Typer
 import effekt.util.{ SourceTask, VirtualSource }
 import org.bitbucket.inkytonik.kiama
@@ -46,6 +46,7 @@ trait Compiler {
     case "chez-callcc"  => new effekt.generator.ChezSchemeCallCC
     case "chez-monadic" => new effekt.generator.ChezSchemeMonadic
     case "chez-lift"    => new effekt.generator.ChezSchemeLift
+    case "llvm"         => new effekt.generator.LLVM
   }
 
   // Tasks

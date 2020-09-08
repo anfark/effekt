@@ -85,6 +85,7 @@ trait Driver extends CompilerWithConfig[Tree, ModuleDecl, EffektConfig] { outer 
     C.config.generator() match {
       case gen if gen.startsWith("js")   => evalJS(mod)
       case gen if gen.startsWith("chez") => evalCS(mod)
+      case gen if gen.startsWith("llvm") => evalLLVM(mod)
     }
   }
 
@@ -106,6 +107,18 @@ trait Driver extends CompilerWithConfig[Tree, ModuleDecl, EffektConfig] { outer 
       C.checkMain(mod)
       val csFile = C.generatorPhase.path(mod)
       val command = Process(Seq("scheme", "--script", csFile))
+      C.config.output().emit(command.!!)
+    } catch {
+      case FatalPhaseError(e) =>
+        C.error(e)
+    }
+  }
+
+  def evalLLVM(mod: Module)(implicit C: Context): Unit = C.at(mod.decl) {
+    try {
+      C.checkMain(mod)
+      val executableFile = C.generatorPhase.path(mod)
+      val command = Process(Seq(executableFile))
       C.config.output().emit(command.!!)
     } catch {
       case FatalPhaseError(e) =>

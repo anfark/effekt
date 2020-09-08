@@ -36,7 +36,7 @@ class EffektConfig(args: Seq[String]) extends REPLConfig(args) {
   )
 
   val generator: ScallopOption[String] = choice(
-    choices = List("js", "js-lift", "chez-callcc", "chez-monadic", "chez-lift"),
+    choices = List("js", "js-lift", "chez-callcc", "chez-monadic", "chez-lift", "llvm"),
     name = "generator",
     descr = "The code generator that should be used",
     default = Some("js"),
