@@ -2,6 +2,7 @@ package effekt
 package context
 
 import effekt.symbols.Module
+import effekt.symbols.TermSymbol
 import effekt.util.Task
 import org.bitbucket.inkytonik.kiama.util.Source
 
@@ -54,9 +55,10 @@ trait ModuleDB { self: Context =>
   } yield mod
 
   /**
-   * Util to check whether main exists on the given module
+   * Util to check whether main exists on the given module.
+   * Returns the main TermSymbol when found and aborts otherwise.
    */
-  def checkMain(mod: Module)(implicit C: Context): Unit = C.at(mod.decl) {
+  def checkMain(mod: Module)(implicit C: Context): TermSymbol = C.at(mod.decl) {
     val mains = mod.terms.getOrElse("main", Set())
 
     if (mains.isEmpty) {
@@ -79,5 +81,6 @@ trait ModuleDB { self: Context =>
     if (userEffects.nonEmpty) {
       C.abort(s"Main cannot have user defined effects, but includes effects: ${userEffects}")
     }
+    main
   }
 }

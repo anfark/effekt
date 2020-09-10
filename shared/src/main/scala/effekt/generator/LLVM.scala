@@ -3,7 +3,7 @@ package effekt.generator
 import effekt.context.Context
 import effekt.machine._
 import effekt.symbols.Module
-import effekt.symbols.{ Name, Symbol }
+import effekt.symbols.{ Name, Symbol, TermSymbol }
 
 import org.bitbucket.inkytonik.kiama
 import kiama.output.ParenPrettyPrinter
@@ -40,13 +40,14 @@ class LLVM extends Generator {
    * and write them.
    */
   def run(src: Source)(implicit C: Context): Option[Document] = for {
+
     mod <- C.frontend(src)
-    _ = C.checkMain(mod)
-    deps = mod.dependencies.flatMap(dep => compile(dep))
-    machine <- C.evenLower(src)
+    mainName = C.checkMain(mod)
+
+    mods = (mod.dependencies :+ mod).flatMap(m => C.evenLower(m.source))
+    result = LLVMPrinter.compilationUnit(mainName, mods)
 
     llvmFile = llvmPath(mod)
-    result = LLVMPrinter.compilationUnit(mod, machine, deps)
     _ = C.saveOutput(result.layout, llvmFile)
 
     objectFile = objectPath(mod)
@@ -60,40 +61,33 @@ class LLVM extends Generator {
 
   } yield result
 
-  /**
-   * Compiles only the given module, does not compile dependencies
-   */
-  def compile(mod: Module)(implicit C: Context): Option[Document] = for {
-    machine <- C.evenLower(mod.source)
-    doc = LLVMPrinter.format(machine)
-  } yield doc
 }
 
 object LLVMPrinter extends ParenPrettyPrinter {
 
   import org.bitbucket.inkytonik.kiama.output.PrettyPrinterTypes.Document
 
-  val prelude = ""
+  val prelude = "define fastcc void @topLevel(%Sp %sp, i64 %res) { ret void }\n\n"
 
-  def compilationUnit(mod: Module, machine: ModuleDecl, dependencies: List[Document])(implicit C: Context): Document =
+  def compilationUnit(mainName: TermSymbol, mods: List[ModuleDecl])(implicit C: Context): Document =
     pretty {
 
-      "define" <+> "i64" <+> "@effektMain" <> "()" <+> braces(
-        "ret" <+> "i64" <+> "9"
+      "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
+        "tail call fastcc void" <+> "@" <> nameDef(mainName) <> "()" <> line <>
+          "ret void"
       )
 
     }
 
-  def moduleFile(path: String): String = path.replace('/', '_') + ".ll"
-
-  def format(machine: ModuleDecl)(implicit C: Context): Document =
-    pretty(module(machine))
-
-  val emptyline: Doc = line <> line
-
-  def module(m: ModuleDecl)(implicit C: Context): Doc = toDoc(m)
-
   def toDoc(m: ModuleDecl)(implicit C: Context): Doc =
     emptyline
+
+  // we prefix op$ to effect operations to avoid clashes with reserved names like `get` and `set`
+  def nameDef(id: Symbol)(implicit C: Context): Doc =
+    id.name.toString + "_" + id.id
+
+  def llvmBlock(content: Doc): Doc = braces(nest(line <> content) <> line)
+
+  val emptyline: Doc = line <> line
 
 }
