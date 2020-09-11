@@ -92,7 +92,8 @@ trait Compiler {
     def run(source: Source)(implicit C: Context): Option[machine.ModuleDecl] = for {
       mod <- frontend(source)
       core <- lower(source)
-      machine <- C.using(module = mod) { machiner(core) }
+      lifted <- C.using(module = mod) { lifter(core) }
+      machine <- C.using(module = mod) { machiner(lifted) }
     } yield machine
   }
 

@@ -1,0 +1,4 @@
+module effekt
+
+extern include "rts.ll"
+

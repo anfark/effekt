@@ -1,7 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-extern long effektMain();
+extern void effektMain();
+
+void print(long int a) {
+  printf("%ld\n", a);
+}
 
 int main(int argc, char** argv) {
   effektMain();

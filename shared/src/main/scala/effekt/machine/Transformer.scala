@@ -5,7 +5,7 @@ import scala.collection.mutable
 
 import effekt.context.Context
 import effekt.context.assertions.SymbolAssertions
-import effekt.symbols._
+import effekt.symbols.{ Symbol, Name, Module }
 import effekt.util.{ Task, control }
 import effekt.util.control._
 
@@ -20,7 +20,41 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transform(mod: core.ModuleDecl)(implicit C: TransformerContext): ModuleDecl = {
     val core.ModuleDecl(path, imports, defs) = mod
 
-    ModuleDecl(path, imports, Exports(path, List())).inheritPosition(mod)
+    ModuleDecl(path, imports, transform(defs))
+  }
+
+  def transform(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
+    stmt match {
+      case core.Include(content, rest) =>
+        Include(content) :: transform(rest)
+      case core.Exports(path, symbols) =>
+        List()
+      case core.Def(name, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
+        Def(name, scope, params.map(transform), transformBody(body)) :: transform(rest)
+      case _ =>
+        println(stmt)
+        C.abort("unsupported " + stmt)
+    }
+  }
+
+  def transformBody(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
+    stmt match {
+      case core.Ret(core.IntLit(value)) =>
+        Ret(IntLit(value))
+      case _ =>
+        println(stmt)
+        C.abort("unsupported " + stmt)
+    }
+  }
+
+  def transform(param: core.Param)(implicit C: TransformerContext): Param = {
+    param match {
+      case core.ValueParam(symbol) =>
+        ValueParam(symbol)
+      case _ =>
+        println(param)
+        C.abort("unsupported " + param)
+    }
   }
 
   case class TransformerContext(context: Context) {

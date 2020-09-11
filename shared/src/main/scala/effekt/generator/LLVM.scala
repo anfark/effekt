@@ -67,26 +67,64 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   import org.bitbucket.inkytonik.kiama.output.PrettyPrinterTypes.Document
 
-  val prelude = "define fastcc void @topLevel(%Sp %sp, i64 %res) { ret void }\n\n"
-
   def compilationUnit(mainName: TermSymbol, mods: List[ModuleDecl])(implicit C: Context): Document =
-    pretty {
+    pretty(
 
-      "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
-        "tail call fastcc void" <+> "@" <> nameDef(mainName) <> "()" <> line <>
-          "ret void"
+      vsep(mods.map(toDoc), line) <@@@>
+
+        "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
+          "%sp = tail call fastcc %Sp @initializeRts()" <@>
+            "tail call fastcc void" <+> globalName(mainName) <> "(%Sp %sp)" <@>
+            "ret void"
+        )
+
+    )
+
+  def toDoc(module: ModuleDecl)(implicit C: Context): Doc =
+    module.decls.map(toDoc).foldRight(emptyDoc)(_ <@@@> _)
+
+  def toDoc(decl: Decl)(implicit C: Context): Doc = decl match {
+    case Def(functionName, evidence, parameters, body) =>
+      "define fastcc void" <+> globalName(functionName) <+> "(%Sp %sp)" <+> llvmBlock(
+        "%spp = alloca %Sp" <@>
+          "store %Sp %sp, %Sp* %spp" <@@@>
+          toDoc(body)
       )
+    case Include(content) =>
+      string(content)
+  }
 
-    }
+  def toDoc(stmt: Stmt)(implicit C: Context): Doc = stmt match {
+    case Ret(expr) =>
+      // TODO find type and generate loadCnt1 and Cnt1
+      // TODO use fresh names for next and newsp
+      // TODO use constant for spp name
+      "%next = call fastcc %Cnt1 @loadCnt1(%Sp* %spp)" <@>
+        "%newsp = load %Sp, %Sp* %spp" <@>
+        "tail call fastcc void %next" <>
+        parens("%Sp %newsp" <> comma <+> "i64" <+> toDoc(expr)) <@>
+        "ret void"
+  }
 
-  def toDoc(m: ModuleDecl)(implicit C: Context): Doc =
-    emptyline
+  def toDoc(expr: Expr)(implicit C: Context): Doc = expr match {
+    case IntLit(value) => value.toString()
+  }
+
+  def globalName(id: Symbol)(implicit C: Context): Doc =
+    "@" <> nameDef(id)
+
+  def globalBuiltin(name: String)(implicit C: Context): Doc =
+    "@" <> name
 
   // we prefix op$ to effect operations to avoid clashes with reserved names like `get` and `set`
   def nameDef(id: Symbol)(implicit C: Context): Doc =
     id.name.toString + "_" + id.id
 
   def llvmBlock(content: Doc): Doc = braces(nest(line <> content) <> line)
+
+  implicit class MyDocOps(self: Doc) {
+    def <@@@>(other: Doc): Doc = self <> emptyline <> other
+  }
 
   val emptyline: Doc = line <> line
 
