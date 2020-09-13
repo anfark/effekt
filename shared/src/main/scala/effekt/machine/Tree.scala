@@ -25,7 +25,7 @@ case class ValueParam(id: Symbol) extends Param
 sealed trait Decl extends Tree
 
 case class Def(id: Symbol, scope: Symbol, params: List[Param], body: Stmt) extends Decl
-
+case class DefPrim(id: Symbol, params: List[Param], body: String) extends Decl
 case class Include(contents: String) extends Decl
 
 /**
@@ -33,20 +33,21 @@ case class Include(contents: String) extends Decl
  */
 sealed trait Stmt extends Tree
 
-case class Ret(e: Expr) extends Stmt
-
-/**
- * Fine-grain CBV: Arguments can be either expressions or blocks
- */
-sealed trait Argument extends Tree
+case class Let(id: Symbol, bind: Expr, body: Stmt) extends Stmt
+case class Ret(v: Valu) extends Stmt
 
 /**
  * Expressions
  */
-sealed trait Expr extends Tree with Argument
+sealed trait Expr extends Tree
 
-sealed trait Literal[T] extends Expr {
-  def value: T
-}
-case class IntLit(value: Int) extends Literal[Int]
+case class AppPrim(name: Symbol, args: List[Valu]) extends Expr
+
+/**
+ * Values
+ */
+sealed trait Valu extends Tree
+
+case class IntLit(value: Int) extends Valu
+case class Var(id: Symbol) extends Valu
 

@@ -2,3 +2,11 @@ module effekt
 
 extern include "rts.ll"
 
+extern include "primitives.ll"
+
+extern effect Console
+
+extern pure def printInt(n: Int): Unit / Console =
+  "call void @printf([6 x i8]* @printIntString, i64 %n) ret i64 0"
+
+

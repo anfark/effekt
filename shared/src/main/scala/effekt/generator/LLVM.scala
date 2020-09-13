@@ -72,10 +72,10 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
       vsep(mods.map(toDoc), line) <@@@>
 
+        // TODO load newsp from somewhere like with the others...
         "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
           "%sp = tail call fastcc %Sp @initializeRts()" <@>
-            "tail call fastcc void" <+> globalName(mainName) <> "(%Sp %sp)" <@>
-            "ret void"
+            jump(globalName(mainName), "%Sp %sp", List())
         )
 
     )
@@ -85,30 +85,64 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDoc(decl: Decl)(implicit C: Context): Doc = decl match {
     case Def(functionName, evidence, parameters, body) =>
+      // TODO parameters
+      // TODO move out definition code
       "define fastcc void" <+> globalName(functionName) <+> "(%Sp %sp)" <+> llvmBlock(
         "%spp = alloca %Sp" <@>
           "store %Sp %sp, %Sp* %spp" <@@@>
           toDoc(body)
       )
+    case DefPrim(functionName, parameters, body) =>
+      // TODO make different return types possible
+      "define fastcc" <+> "i64" <+> globalName(functionName) <>
+        // TODO we can't use the unique id here, since we do not know it in the extern string.
+        // TODO somehow get type
+        argumentList(parameters.map(p => "i64" <+> "%" <> p.id.name.toString())) <+>
+        llvmBlock(
+          string(body)
+        )
     case Include(content) =>
       string(content)
   }
 
   def toDoc(stmt: Stmt)(implicit C: Context): Doc = stmt match {
-    case Ret(expr) =>
+    case Let(name, expr, body) =>
+      localName(name) <+> "=" <+> toDoc(expr) <@>
+        toDoc(body)
+    case Ret(valu) =>
       // TODO find type and generate loadCnt1 and Cnt1
       // TODO use fresh names for next and newsp
       // TODO use constant for spp name
+      // TODO move newsp stuff to into jump
       "%next = call fastcc %Cnt1 @loadCnt1(%Sp* %spp)" <@>
         "%newsp = load %Sp, %Sp* %spp" <@>
-        "tail call fastcc void %next" <>
-        parens("%Sp %newsp" <> comma <+> "i64" <+> toDoc(expr)) <@>
-        "ret void"
+        jump("%next", "%Sp %newsp", List(toDoc(valu)))
   }
 
   def toDoc(expr: Expr)(implicit C: Context): Doc = expr match {
-    case IntLit(value) => value.toString()
+    case AppPrim(blockName, args) =>
+      // TODO find return type
+      "call" <+> "i64" <+> globalName(blockName) <> argumentList(args.map(toDoc))
   }
+
+  def toDoc(valu: Valu)(implicit C: Context): Doc = valu match {
+    case IntLit(value) => "i64" <+> value.toString()
+    case Var(name) =>
+      // TODO somehow get type
+      "i64" <+> localName(name)
+  }
+
+  def toDoc(param: Param)(implicit C: Context): Doc = param match {
+    // TODO somehow get type
+    case ValueParam(name) => "i64" <+> localName(name)
+  }
+
+  def jump(name: Doc, spp: Doc, args: List[Doc]): Doc =
+    "tail" <+> "call" <+> "fastcc" <+> "void" <+> name <> argumentList(spp :: args) <@>
+      "ret" <+> "void"
+
+  def localName(id: Symbol)(implicit C: Context): Doc =
+    "%" <> nameDef(id)
 
   def globalName(id: Symbol)(implicit C: Context): Doc =
     "@" <> nameDef(id)
@@ -126,6 +160,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
     def <@@@>(other: Doc): Doc = self <> emptyline <> other
   }
 
+  def argumentList(args: List[Doc]) = parens(hsep(args, comma))
   val emptyline: Doc = line <> line
 
 }

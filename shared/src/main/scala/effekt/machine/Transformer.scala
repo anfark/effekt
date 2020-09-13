@@ -25,12 +25,14 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
     stmt match {
+      case core.Def(name, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
+        Def(name, scope, params.map(transform), transformBody(body)) :: transform(rest)
+      case core.Def(name, core.Extern(params, body), rest) =>
+        DefPrim(name, params.map(transform), body) :: transform(rest)
       case core.Include(content, rest) =>
         Include(content) :: transform(rest)
       case core.Exports(path, symbols) =>
         List()
-      case core.Def(name, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
-        Def(name, scope, params.map(transform), transformBody(body)) :: transform(rest)
       case _ =>
         println(stmt)
         C.abort("unsupported " + stmt)
@@ -39,11 +41,35 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transformBody(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
     stmt match {
-      case core.Ret(core.IntLit(value)) =>
-        Ret(IntLit(value))
+      case core.Ret(expr) =>
+        ANF { transform(expr).map(Ret) }
       case _ =>
         println(stmt)
         C.abort("unsupported " + stmt)
+    }
+  }
+
+  def transform(expr: core.Expr)(implicit C: TransformerContext): Control[Valu] = {
+    expr match {
+      case core.IntLit(value) =>
+        pure(IntLit(value))
+      case core.PureApp(core.BlockVar(blockName), args) => for {
+        argsVals <- sequence(args.map(transform))
+        result <- binding(AppPrim(blockName, argsVals))
+      } yield result
+      case _ =>
+        println(expr)
+        C.abort("unsupported " + expr)
+    }
+  }
+
+  def transform(arg: core.Argument)(implicit C: TransformerContext): Control[Valu] = {
+    arg match {
+      case expr: core.Expr =>
+        transform(expr)
+      case _ =>
+        println(arg)
+        C.abort("unsupported " + arg)
     }
   }
 
@@ -56,6 +82,32 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         C.abort("unsupported " + param)
     }
   }
+
+  /**
+   * Let insertion
+   */
+
+  private val delimiter: Cap[Stmt] = new Capability { type Res = Stmt }
+
+  def ANF(e: Control[Stmt]): Stmt = control.handle(delimiter)(e).run()
+
+  def binding(expr: Expr)(implicit C: TransformerContext): Control[Valu] =
+    control.use(delimiter) { k =>
+      val x = Tmp(C.module)
+      k.apply(Var(x)).map(body => Let(x, expr, body))
+    }
+
+  def sequence[R](ar: List[Control[R]])(implicit C: TransformerContext): Control[List[R]] = ar match {
+    case Nil => pure { Nil }
+    case (r :: rs) => for {
+      rv <- r
+      rsv <- sequence(rs)
+    } yield rv :: rsv
+  }
+
+  /**
+   * Extra info in context
+   */
 
   case class TransformerContext(context: Context) {
   }
