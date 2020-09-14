@@ -92,12 +92,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
         allocAndStoreSpp <@@@>
           toDoc(body)
       )
-    case DefPrim(functionName, parameters, body) =>
-      // TODO make different return types possible
-      "define fastcc" <+> "i64" <+> globalName(functionName) <>
+    case DefPrim(returnType, functionName, parameters, body) =>
+      "define fastcc" <+> toDoc(returnType) <+> globalName(functionName) <>
         // TODO we can't use the unique id here, since we do not know it in the extern string.
-        // TODO somehow get type
-        argumentList(parameters.map(p => "i64" <+> "%" <> p.id.name.toString())) <+>
+        argumentList(parameters.map {
+          case ValueParam(typ, id) => toDoc(typ) <+> "%" <> id.name.toString()
+        }) <+>
         "alwaysinline" <+> llvmBlock(
           string(body)
         )
@@ -117,21 +117,21 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   def toDoc(expr: Expr)(implicit C: Context): Doc = expr match {
-    case AppPrim(blockName, args) =>
-      // TODO find return type
-      "call" <+> "i64" <+> globalName(blockName) <> argumentList(args.map(toDoc))
+    case AppPrim(returnType, blockName, args) =>
+      "call" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDoc))
   }
 
   def toDoc(valu: Valu)(implicit C: Context): Doc = valu match {
-    case IntLit(value) => "i64" <+> value.toString()
-    case Var(name) =>
-      // TODO somehow get type
-      "i64" <+> localName(name)
+    case IntLit(value)  => toDoc(PrimInt()) <+> value.toString()
+    case Var(typ, name) => toDoc(typ) <+> localName(name)
   }
 
   def toDoc(param: Param)(implicit C: Context): Doc = param match {
-    // TODO somehow get type
-    case ValueParam(name) => "i64" <+> localName(name)
+    case ValueParam(typ, name) => toDoc(typ) <+> localName(name)
+  }
+
+  def toDoc(typ: Type)(implicit C: Context): Doc = typ match {
+    case PrimInt() => "i64"
   }
 
   def jump(name: Doc, args: List[Doc]): Doc =

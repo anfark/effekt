@@ -16,16 +16,13 @@ sealed trait Tree extends Product {
  */
 case class ModuleDecl(path: String, imports: List[String], decls: List[Decl]) extends Tree
 
-sealed trait Param extends Tree { def id: Symbol }
-case class ValueParam(id: Symbol) extends Param
-
 /**
  * Toplevel declarations
  */
 sealed trait Decl extends Tree
 
 case class Def(id: Symbol, scope: Symbol, params: List[Param], body: Stmt) extends Decl
-case class DefPrim(id: Symbol, params: List[Param], body: String) extends Decl
+case class DefPrim(typ: Type, id: Symbol, params: List[Param], body: String) extends Decl
 case class Include(contents: String) extends Decl
 
 /**
@@ -41,7 +38,7 @@ case class Ret(v: Valu) extends Stmt
  */
 sealed trait Expr extends Tree
 
-case class AppPrim(name: Symbol, args: List[Valu]) extends Expr
+case class AppPrim(typ: Type, name: Symbol, args: List[Valu]) extends Expr
 
 /**
  * Values
@@ -49,5 +46,19 @@ case class AppPrim(name: Symbol, args: List[Valu]) extends Expr
 sealed trait Valu extends Tree
 
 case class IntLit(value: Int) extends Valu
-case class Var(id: Symbol) extends Valu
+case class Var(typ: Type, id: Symbol) extends Valu
+
+/**
+ * Parameters
+ */
+sealed trait Param extends Tree
+
+case class ValueParam(typ: Type, id: Symbol) extends Param
+
+/**
+ * Types
+ */
+sealed trait Type extends Tree
+
+case class PrimInt() extends Type
 

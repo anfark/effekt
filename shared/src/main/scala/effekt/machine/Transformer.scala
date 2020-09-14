@@ -28,7 +28,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       case core.Def(name, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
         Def(name, scope, params.map(transform), transformBody(body)) :: transform(rest)
       case core.Def(name, core.Extern(params, body), rest) =>
-        DefPrim(name, params.map(transform), body) :: transform(rest)
+        // TODO find actual return type
+        DefPrim(PrimInt(), name, params.map(transform), body) :: transform(rest)
       case core.Include(content, rest) =>
         Include(content) :: transform(rest)
       case core.Exports(path, symbols) =>
@@ -55,7 +56,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(IntLit(value))
       case core.PureApp(core.BlockVar(blockName), args) => for {
         argsVals <- sequence(args.map(transform))
-        result <- binding(AppPrim(blockName, argsVals))
+        // TODO find out return type
+        result <- binding(AppPrim(PrimInt(), blockName, argsVals))
       } yield result
       case _ =>
         println(expr)
@@ -76,7 +78,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transform(param: core.Param)(implicit C: TransformerContext): Param = {
     param match {
       case core.ValueParam(symbol) =>
-        ValueParam(symbol)
+        // TODO find actual parameter type
+        ValueParam(PrimInt(), symbol)
       case _ =>
         println(param)
         C.abort("unsupported " + param)
@@ -91,10 +94,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def ANF(e: Control[Stmt]): Stmt = control.handle(delimiter)(e).run()
 
-  def binding(expr: Expr)(implicit C: TransformerContext): Control[Valu] =
+  def binding(expr: AppPrim)(implicit C: TransformerContext): Control[Valu] =
     control.use(delimiter) { k =>
       val x = Tmp(C.module)
-      k.apply(Var(x)).map(body => Let(x, expr, body))
+      k.apply(Var(expr.typ, x)).map(body => Let(x, expr, body))
     }
 
   def sequence[R](ar: List[Control[R]])(implicit C: TransformerContext): Control[List[R]] = ar match {
