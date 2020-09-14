@@ -5,7 +5,7 @@ import scala.collection.mutable
 
 import effekt.context.Context
 import effekt.context.assertions.SymbolAssertions
-import effekt.symbols.{ Symbol, Name, Module }
+import effekt.symbols.{ Symbol, Name, Module, builtins }
 import effekt.util.{ Task, control }
 import effekt.util.control._
 
@@ -25,11 +25,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
     stmt match {
-      case core.Def(name, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
-        Def(name, scope, params.map(transform), transformBody(body)) :: transform(rest)
-      case core.Def(name, core.Extern(params, body), rest) =>
-        // TODO find actual return type
-        DefPrim(PrimInt(), name, params.map(transform), body) :: transform(rest)
+      case core.Def(blockName, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
+        Def(blockName, scope, params.map(transform), transformBody(body)) :: transform(rest)
+      case core.Def(blockName, core.Extern(params, body), rest) =>
+        DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transform(rest)
       case core.Include(content, rest) =>
         Include(content) :: transform(rest)
       case core.Exports(path, symbols) =>
@@ -56,8 +55,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(IntLit(value))
       case core.PureApp(core.BlockVar(blockName), args) => for {
         argsVals <- sequence(args.map(transform))
-        // TODO find out return type
-        result <- binding(AppPrim(PrimInt(), blockName, argsVals))
+        result <- binding(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))
       } yield result
       case _ =>
         println(expr)
@@ -77,14 +75,30 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(param: core.Param)(implicit C: TransformerContext): Param = {
     param match {
-      case core.ValueParam(symbol) =>
-        // TODO find actual parameter type
-        ValueParam(PrimInt(), symbol)
+      case core.ValueParam(name) =>
+        ValueParam(transform(C.valueTypeOf(name)), name)
       case _ =>
         println(param)
         C.abort("unsupported " + param)
     }
   }
+
+  def transform(typ: symbols.Type)(implicit C: TransformerContext): Type = {
+    typ match {
+      case symbols.BuiltinType(builtins.TInt.name, List()) =>
+        PrimInt()
+      case symbols.BuiltinType(builtins.TUnit.name, List()) =>
+        PrimUnit()
+      case _ =>
+        println(typ)
+        C.abort("unsupported " + typ)
+    }
+  }
+
+  def returnTypeOf(blockName: Symbol)(implicit C: TransformerContext): symbols.Type =
+    C.blockTypeOf(blockName) match {
+      case symbols.BlockType(_, _, symbols.Effectful(returnType, _)) => returnType
+    }
 
   /**
    * Let insertion

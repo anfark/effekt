@@ -131,7 +131,11 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   def toDoc(typ: Type)(implicit C: Context): Doc = typ match {
-    case PrimInt() => "i64"
+    case PrimUnit() =>
+      // TODO choose different representation for unit
+      "i64"
+    case PrimInt() =>
+      "i64"
   }
 
   def jump(name: Doc, args: List[Doc]): Doc =

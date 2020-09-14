@@ -60,5 +60,6 @@ case class ValueParam(typ: Type, id: Symbol) extends Param
  */
 sealed trait Type extends Tree
 
+case class PrimUnit() extends Type
 case class PrimInt() extends Type
 
