@@ -72,10 +72,11 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
       vsep(mods.map(toDoc), line) <@@@>
 
-        // TODO load newsp from somewhere like with the others...
         "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
           "%sp = tail call fastcc %Sp @initializeRts()" <@>
-            jump(globalName(mainName), "%Sp %sp", List())
+            // TODO generate and store topLevelCnt
+            allocAndStoreSpp <@@@>
+            jump(globalName(mainName), List())
         )
 
     )
@@ -88,8 +89,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
       // TODO parameters
       // TODO move out definition code
       "define fastcc void" <+> globalName(functionName) <+> "(%Sp %sp)" <+> llvmBlock(
-        "%spp = alloca %Sp" <@>
-          "store %Sp %sp, %Sp* %spp" <@@@>
+        allocAndStoreSpp <@@@>
           toDoc(body)
       )
     case DefPrim(functionName, parameters, body) =>
@@ -111,12 +111,9 @@ object LLVMPrinter extends ParenPrettyPrinter {
         toDoc(body)
     case Ret(valu) =>
       // TODO find type and generate loadCnt1 and Cnt1
-      // TODO use fresh names for next and newsp
-      // TODO use constant for spp name
-      // TODO move newsp stuff to into jump
+      // TODO use fresh name for next
       "%next = call fastcc %Cnt1 @loadCnt1(%Sp* %spp)" <@>
-        "%newsp = load %Sp, %Sp* %spp" <@>
-        jump("%next", "%Sp %newsp", List(toDoc(valu)))
+        jump("%next", List(toDoc(valu)))
   }
 
   def toDoc(expr: Expr)(implicit C: Context): Doc = expr match {
@@ -137,9 +134,16 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case ValueParam(name) => "i64" <+> localName(name)
   }
 
-  def jump(name: Doc, spp: Doc, args: List[Doc]): Doc =
-    "tail" <+> "call" <+> "fastcc" <+> "void" <+> name <> argumentList(spp :: args) <@>
+  def jump(name: Doc, args: List[Doc]): Doc =
+    // TODO use constant for spp name
+    // TODO generate fresh name for newsp
+    "%newsp = load %Sp, %Sp* %spp" <@>
+      "tail call fastcc void" <+> name <> argumentList(("%Sp" <+> "%newsp") :: args) <@>
       "ret" <+> "void"
+
+  val allocAndStoreSpp =
+    "%spp = alloca %Sp" <@>
+      "store %Sp %sp, %Sp* %spp"
 
   def localName(id: Symbol)(implicit C: Context): Doc =
     "%" <> nameDef(id)
@@ -161,6 +165,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   def argumentList(args: List[Doc]) = parens(hsep(args, comma))
+
   val emptyline: Doc = line <> line
 
 }
