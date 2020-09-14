@@ -4,9 +4,31 @@ extern include "rts.ll"
 
 extern include "primitives.ll"
 
+// Console ops
+// ==========
+
 extern effect Console
 
 extern pure def printInt(n: Int): Unit / Console =
   "call void @printf([6 x i8]* @printIntString, i64 %n) ret i64 0"
+
+// Math ops
+// ========
+
+extern pure def infixAdd(x: Int, y: Int): Int =
+  "%z = add i64 %x, %y ret i64 %z"
+
+extern pure def infixMul(x: Int, y: Int): Int =
+  "%z = mul i64 %x, %y ret i64 %z"
+
+extern pure def infixDiv(x: Int, y: Int): Int =
+  "%z = sdiv i64 %x, %y ret i64 %z"
+
+extern pure def infixSub(x: Int, y: Int): Int =
+  "%z = sub i64 %x, %y ret i64 %z"
+
+extern pure def mod(x: Int, y: Int): Int =
+  "%z = srem i64 %x, %y ret i64 %z"
+
 
 

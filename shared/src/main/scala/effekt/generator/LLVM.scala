@@ -98,7 +98,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
         // TODO we can't use the unique id here, since we do not know it in the extern string.
         // TODO somehow get type
         argumentList(parameters.map(p => "i64" <+> "%" <> p.id.name.toString())) <+>
-        llvmBlock(
+        "alwaysinline" <+> llvmBlock(
           string(body)
         )
     case Include(content) =>
