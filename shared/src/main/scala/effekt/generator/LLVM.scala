@@ -9,6 +9,7 @@ import org.bitbucket.inkytonik.kiama
 import kiama.output.ParenPrettyPrinter
 import kiama.output.PrettyPrinterTypes.Document
 import kiama.util.Source
+import org.bitbucket.inkytonik.kiama.util.Counter
 import effekt.context.assertions._
 
 import scala.language.implicitConversions
@@ -45,7 +46,7 @@ class LLVM extends Generator {
     mainName = C.checkMain(mod)
 
     mods = (mod.dependencies :+ mod).flatMap(m => C.evenLower(m.source))
-    result = LLVMPrinter.compilationUnit(mainName, mods)
+    result = LLVMPrinter.compilationUnit(mainName, mods)(LLVMPrinter.LLVMContext(C))
 
     llvmFile = llvmPath(mod)
     _ = C.saveOutput(result.layout, llvmFile)
@@ -67,7 +68,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   import org.bitbucket.inkytonik.kiama.output.PrettyPrinterTypes.Document
 
-  def compilationUnit(mainName: TermSymbol, mods: List[ModuleDecl])(implicit C: Context): Document =
+  def compilationUnit(mainName: TermSymbol, mods: List[ModuleDecl])(implicit C: LLVMContext): Document =
     pretty(
 
       vsep(mods.map(toDoc), line) <@@@>
@@ -81,10 +82,10 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
     )
 
-  def toDoc(module: ModuleDecl)(implicit C: Context): Doc =
+  def toDoc(module: ModuleDecl)(implicit C: LLVMContext): Doc =
     module.decls.map(toDoc).foldRight(emptyDoc)(_ <@@@> _)
 
-  def toDoc(decl: Decl)(implicit C: Context): Doc = decl match {
+  def toDoc(decl: Decl)(implicit C: LLVMContext): Doc = decl match {
     case Def(functionName, evidence, parameters, body) =>
       // TODO parameters
       // TODO move out definition code
@@ -105,33 +106,43 @@ object LLVMPrinter extends ParenPrettyPrinter {
       string(content)
   }
 
-  def toDoc(stmt: Stmt)(implicit C: Context): Doc = stmt match {
+  def toDoc(stmt: Stmt)(implicit C: LLVMContext): Doc = stmt match {
     case Let(name, expr, body) =>
       localName(name) <+> "=" <+> toDoc(expr) <@>
         toDoc(body)
     case Ret(valu) =>
       // TODO find type and generate loadCnt1 and Cnt1
-      // TODO use fresh name for next
-      "%next = call fastcc %Cnt1 @loadCnt1(%Sp* %spp)" <@>
-        jump("%next", List(toDoc(valu)))
+      val nextCntName = "%" <> freshName("next")
+      nextCntName <+> "=" <+> "call fastcc %Cnt1 @loadCnt1(%Sp* %spp)" <@>
+        jump(nextCntName, List(toDoc(valu)))
+    case If(cond, thn, els) =>
+      val thenName = freshName("then")
+      val elseName = freshName("else")
+      "br" <+> toDoc(cond) <>
+        comma <+> "label" <+> "%" <> thenName <>
+        comma <+> "label" <+> "%" <> elseName <@>
+        thenName <> colon <@>
+        toDoc(thn) <@>
+        elseName <> colon <@>
+        toDoc(els)
   }
 
-  def toDoc(expr: Expr)(implicit C: Context): Doc = expr match {
+  def toDoc(expr: Expr)(implicit C: LLVMContext): Doc = expr match {
     case AppPrim(returnType, blockName, args) =>
       "call" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDoc))
   }
 
-  def toDoc(valu: Valu)(implicit C: Context): Doc = valu match {
+  def toDoc(valu: Valu)(implicit C: LLVMContext): Doc = valu match {
     case IntLit(value)     => toDoc(PrimInt()) <+> value.toString()
     case BooleanLit(value) => toDoc(PrimBoolean()) <+> value.toString()
     case Var(typ, name)    => toDoc(typ) <+> localName(name)
   }
 
-  def toDoc(param: Param)(implicit C: Context): Doc = param match {
+  def toDoc(param: Param)(implicit C: LLVMContext): Doc = param match {
     case ValueParam(typ, name) => toDoc(typ) <+> localName(name)
   }
 
-  def toDoc(typ: Type)(implicit C: Context): Doc = typ match {
+  def toDoc(typ: Type)(implicit C: LLVMContext): Doc = typ match {
     case PrimUnit() =>
       // TODO choose different representation for unit
       "%Unit"
@@ -141,29 +152,32 @@ object LLVMPrinter extends ParenPrettyPrinter {
       "%Boolean"
   }
 
-  def jump(name: Doc, args: List[Doc]): Doc =
+  def jump(name: Doc, args: List[Doc])(implicit C: LLVMContext): Doc = {
     // TODO use constant for spp name
-    // TODO generate fresh name for newsp
-    "%newsp = load %Sp, %Sp* %spp" <@>
-      "tail call fastcc void" <+> name <> argumentList(("%Sp" <+> "%newsp") :: args) <@>
+    val newspName = "%" <> freshName("newsp")
+    newspName <+> "=" <+> "load %Sp, %Sp* %spp" <@>
+      "tail call fastcc void" <+> name <> argumentList(("%Sp" <+> newspName) :: args) <@>
       "ret" <+> "void"
+  }
 
   val allocAndStoreSpp =
     "%spp = alloca %Sp" <@>
       "store %Sp %sp, %Sp* %spp"
 
-  def localName(id: Symbol)(implicit C: Context): Doc =
+  def localName(id: Symbol)(implicit C: LLVMContext): Doc =
     "%" <> nameDef(id)
 
-  def globalName(id: Symbol)(implicit C: Context): Doc =
+  def globalName(id: Symbol)(implicit C: LLVMContext): Doc =
     "@" <> nameDef(id)
 
-  def globalBuiltin(name: String)(implicit C: Context): Doc =
+  def globalBuiltin(name: String)(implicit C: LLVMContext): Doc =
     "@" <> name
 
-  // we prefix op$ to effect operations to avoid clashes with reserved names like `get` and `set`
-  def nameDef(id: Symbol)(implicit C: Context): Doc =
+  def nameDef(id: Symbol)(implicit C: LLVMContext): Doc =
     id.name.toString + "_" + id.id
+
+  def freshName(name: String)(implicit C: LLVMContext): Doc =
+    name <> underscore <> C.fresh.next().toString()
 
   def llvmBlock(content: Doc): Doc = braces(nest(line <> content) <> line)
 
@@ -174,5 +188,16 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def argumentList(args: List[Doc]) = parens(hsep(args, comma))
 
   val emptyline: Doc = line <> line
+
+  /**
+   * Extra info in context
+   */
+
+  case class LLVMContext(context: Context) {
+    val fresh = new Counter(0)
+  }
+
+  private implicit def asContext(C: LLVMContext): Context = C.context
+  private implicit def getContext(implicit C: LLVMContext): Context = C.context
 
 }

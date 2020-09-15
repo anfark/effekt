@@ -20,17 +20,17 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transform(mod: core.ModuleDecl)(implicit C: TransformerContext): ModuleDecl = {
     val core.ModuleDecl(path, imports, defs) = mod
 
-    ModuleDecl(path, imports, transform(defs))
+    ModuleDecl(path, imports, transformToplevel(defs))
   }
 
-  def transform(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
+  def transformToplevel(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
     stmt match {
       case core.Def(blockName, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
-        Def(blockName, scope, params.map(transform), transformBody(body)) :: transform(rest)
+        Def(blockName, scope, params.map(transform), transform(body)) :: transformToplevel(rest)
       case core.Def(blockName, core.Extern(params, body), rest) =>
-        DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transform(rest)
+        DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transformToplevel(rest)
       case core.Include(content, rest) =>
-        Include(content) :: transform(rest)
+        Include(content) :: transformToplevel(rest)
       case core.Exports(path, symbols) =>
         List()
       case _ =>
@@ -39,10 +39,12 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     }
   }
 
-  def transformBody(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
+  def transform(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
     stmt match {
       case core.Ret(expr) =>
         ANF { transform(expr).map(Ret) }
+      case core.If(cond, thn, els) =>
+        ANF { transform(cond).map(v => If(v, transform(thn), transform(els))) }
       case _ =>
         println(stmt)
         C.abort("unsupported " + stmt)
