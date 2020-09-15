@@ -26,6 +26,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transformToplevel(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
     stmt match {
       case core.Def(blockName, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
+        // TODO deal with evidence
         Def(blockName, scope, params.map(transform), transform(body)) :: transformToplevel(rest)
       case core.Def(blockName, core.Extern(params, body), rest) =>
         DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transformToplevel(rest)
@@ -45,6 +46,9 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         ANF { transform(expr).map(Ret) }
       case core.If(cond, thn, els) =>
         ANF { transform(cond).map(v => If(v, transform(thn), transform(els))) }
+      case core.App(core.ScopeApp(core.BlockVar(name), scope), args) =>
+        // TODO deal with evidence
+        ANF { sequence(args.map(transform)).map(argVals => Jump(name, argVals)) }
       case _ =>
         println(stmt)
         C.abort("unsupported " + stmt)
@@ -57,6 +61,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(IntLit(value))
       case core.BooleanLit(value) =>
         pure(BooleanLit(value))
+      case core.ValueVar(name) =>
+        pure(Var(transform(C.valueTypeOf(name)), name))
       case core.PureApp(core.BlockVar(blockName), args) => for {
         argsVals <- sequence(args.map(transform))
         result <- binding(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))

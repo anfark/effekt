@@ -33,13 +33,14 @@ sealed trait Stmt extends Tree
 case class Let(id: Symbol, bind: Expr, body: Stmt) extends Stmt
 case class Ret(v: Valu) extends Stmt
 case class If(cond: Valu, thn: Stmt, els: Stmt) extends Stmt
+case class Jump(id: Symbol, args: List[Valu]) extends Stmt
 
 /**
  * Expressions
  */
 sealed trait Expr extends Tree
 
-case class AppPrim(typ: Type, name: Symbol, args: List[Valu]) extends Expr
+case class AppPrim(typ: Type, id: Symbol, args: List[Valu]) extends Expr
 
 /**
  * Values

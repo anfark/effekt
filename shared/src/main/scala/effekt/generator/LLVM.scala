@@ -74,7 +74,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
       vsep(mods.map(toDoc), line) <@@@>
 
         "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
-          "%sp = tail call fastcc %Sp @initializeRts()" <@>
+          "%sp = call fastcc %Sp @initializeRts()" <@>
             // TODO generate and store topLevelCnt
             allocAndStoreSpp <@@@>
             jump(globalName(mainName), List())
@@ -87,15 +87,16 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDoc(decl: Decl)(implicit C: LLVMContext): Doc = decl match {
     case Def(functionName, evidence, parameters, body) =>
-      // TODO parameters
       // TODO move out definition code
-      "define fastcc void" <+> globalName(functionName) <+> "(%Sp %sp)" <+> llvmBlock(
-        allocAndStoreSpp <@@@>
-          toDoc(body)
-      )
+      // TODO don't rely on spp and sp being the same in allocAndStoreSpp
+      "define fastcc void" <+> globalName(functionName) <+>
+        argumentList(("%Sp" <+> "%sp") :: parameters.map(toDoc)) <+> llvmBlock(
+          allocAndStoreSpp <@@@>
+            toDoc(body)
+        )
     case DefPrim(returnType, functionName, parameters, body) =>
       "define fastcc" <+> toDoc(returnType) <+> globalName(functionName) <>
-        // TODO we can't use the unique id here, since we do not know it in the extern string.
+        // we can't use unique id here, since we do not know it in the extern string.
         argumentList(parameters.map {
           case ValueParam(typ, id) => toDoc(typ) <+> "%" <> id.name.toString()
         }) <+>
@@ -125,11 +126,14 @@ object LLVMPrinter extends ParenPrettyPrinter {
         toDoc(thn) <@>
         elseName <> colon <@>
         toDoc(els)
+    case Jump(name, args) =>
+      // TODO find type and generate loadCnt1 and Cnt1
+      jump(globalName(name), args.map(toDoc))
   }
 
   def toDoc(expr: Expr)(implicit C: LLVMContext): Doc = expr match {
     case AppPrim(returnType, blockName, args) =>
-      "call" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDoc))
+      "call fastcc" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDoc))
   }
 
   def toDoc(valu: Valu)(implicit C: LLVMContext): Doc = valu match {
