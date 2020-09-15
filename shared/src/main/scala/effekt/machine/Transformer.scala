@@ -126,14 +126,6 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       k.apply(Var(expr.typ, x)).map(body => Let(x, expr, body))
     }
 
-  def sequence[R](ar: List[Control[R]])(implicit C: TransformerContext): Control[List[R]] = ar match {
-    case Nil => pure { Nil }
-    case (r :: rs) => for {
-      rv <- r
-      rsv <- sequence(rs)
-    } yield rv :: rsv
-  }
-
   /**
    * Extra info in context
    */
