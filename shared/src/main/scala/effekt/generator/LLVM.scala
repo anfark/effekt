@@ -122,8 +122,9 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   def toDoc(valu: Valu)(implicit C: Context): Doc = valu match {
-    case IntLit(value)  => toDoc(PrimInt()) <+> value.toString()
-    case Var(typ, name) => toDoc(typ) <+> localName(name)
+    case IntLit(value)     => toDoc(PrimInt()) <+> value.toString()
+    case BooleanLit(value) => toDoc(PrimBoolean()) <+> value.toString()
+    case Var(typ, name)    => toDoc(typ) <+> localName(name)
   }
 
   def toDoc(param: Param)(implicit C: Context): Doc = param match {
@@ -133,9 +134,11 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def toDoc(typ: Type)(implicit C: Context): Doc = typ match {
     case PrimUnit() =>
       // TODO choose different representation for unit
-      "i64"
+      "%Unit"
     case PrimInt() =>
-      "i64"
+      "%Int"
+    case PrimBoolean() =>
+      "%Boolean"
   }
 
   def jump(name: Doc, args: List[Doc]): Doc =

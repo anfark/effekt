@@ -46,6 +46,7 @@ case class AppPrim(typ: Type, name: Symbol, args: List[Valu]) extends Expr
 sealed trait Valu extends Tree
 
 case class IntLit(value: Int) extends Valu
+case class BooleanLit(value: Boolean) extends Valu
 case class Var(typ: Type, id: Symbol) extends Valu
 
 /**
@@ -62,4 +63,5 @@ sealed trait Type extends Tree
 
 case class PrimUnit() extends Type
 case class PrimInt() extends Type
+case class PrimBoolean() extends Type
 

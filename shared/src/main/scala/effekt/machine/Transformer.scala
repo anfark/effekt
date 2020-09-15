@@ -53,6 +53,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     expr match {
       case core.IntLit(value) =>
         pure(IntLit(value))
+      case core.BooleanLit(value) =>
+        pure(BooleanLit(value))
       case core.PureApp(core.BlockVar(blockName), args) => for {
         argsVals <- sequence(args.map(transform))
         result <- binding(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))
@@ -85,10 +87,12 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(typ: symbols.Type)(implicit C: TransformerContext): Type = {
     typ match {
-      case symbols.BuiltinType(builtins.TInt.name, List()) =>
-        PrimInt()
       case symbols.BuiltinType(builtins.TUnit.name, List()) =>
         PrimUnit()
+      case symbols.BuiltinType(builtins.TInt.name, List()) =>
+        PrimInt()
+      case symbols.BuiltinType(builtins.TBoolean.name, List()) =>
+        PrimBoolean()
       case _ =>
         println(typ)
         C.abort("unsupported " + typ)
