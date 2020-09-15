@@ -10,7 +10,7 @@ import effekt.util.{ Task, control }
 import effekt.util.control._
 
 case class Wildcard(module: Module) extends Symbol { val name = Name("_", module) }
-case class Tmp(module: Module) extends Symbol { val name = Name("tmp" + Symbol.fresh.next(), module) }
+case class Tmp(module: Module) extends Symbol { val name = Name("tmp", module) }
 
 class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
@@ -55,7 +55,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     }
   }
 
-  def transform(expr: core.Expr)(implicit C: TransformerContext): Control[Valu] = {
+  def transform(expr: core.Expr)(implicit C: TransformerContext): Control[Value] = {
     expr match {
       case core.IntLit(value) =>
         pure(IntLit(value))
@@ -73,7 +73,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     }
   }
 
-  def transform(arg: core.Argument)(implicit C: TransformerContext): Control[Valu] = {
+  def transform(arg: core.Argument)(implicit C: TransformerContext): Control[Value] = {
     arg match {
       case expr: core.Expr =>
         transform(expr)
@@ -120,7 +120,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def ANF(e: Control[Stmt]): Stmt = control.handle(delimiter)(e).run()
 
-  def binding(expr: AppPrim)(implicit C: TransformerContext): Control[Valu] =
+  def binding(expr: AppPrim)(implicit C: TransformerContext): Control[Value] =
     control.use(delimiter) { k =>
       val x = Tmp(C.module)
       k.apply(Var(expr.typ, x)).map(body => Let(x, expr, body))

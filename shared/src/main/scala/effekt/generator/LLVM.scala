@@ -121,9 +121,9 @@ object LLVMPrinter extends ParenPrettyPrinter {
       val elseName = freshName("else")
       "br" <+> toDoc(cond) <>
         comma <+> "label" <+> "%" <> thenName <>
-        comma <+> "label" <+> "%" <> elseName <@>
+        comma <+> "label" <+> "%" <> elseName <@@@>
         thenName <> colon <@>
-        toDoc(thn) <@>
+        toDoc(thn) <@@@>
         elseName <> colon <@>
         toDoc(els)
     case Jump(name, args) =>
@@ -136,7 +136,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
       "call fastcc" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDoc))
   }
 
-  def toDoc(valu: Valu)(implicit C: LLVMContext): Doc = valu match {
+  def toDoc(value: Value)(implicit C: LLVMContext): Doc = value match {
     case IntLit(value)     => toDoc(PrimInt()) <+> value.toString()
     case BooleanLit(value) => toDoc(PrimBoolean()) <+> value.toString()
     case Var(typ, name)    => toDoc(typ) <+> localName(name)

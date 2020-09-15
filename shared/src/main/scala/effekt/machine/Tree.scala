@@ -31,25 +31,25 @@ case class Include(contents: String) extends Decl
 sealed trait Stmt extends Tree
 
 case class Let(id: Symbol, bind: Expr, body: Stmt) extends Stmt
-case class Ret(v: Valu) extends Stmt
-case class If(cond: Valu, thn: Stmt, els: Stmt) extends Stmt
-case class Jump(id: Symbol, args: List[Valu]) extends Stmt
+case class Ret(v: Value) extends Stmt
+case class If(cond: Value, thn: Stmt, els: Stmt) extends Stmt
+case class Jump(id: Symbol, args: List[Value]) extends Stmt
 
 /**
  * Expressions
  */
 sealed trait Expr extends Tree
 
-case class AppPrim(typ: Type, id: Symbol, args: List[Valu]) extends Expr
+case class AppPrim(typ: Type, id: Symbol, args: List[Value]) extends Expr
 
 /**
  * Values
  */
-sealed trait Valu extends Tree
+sealed trait Value extends Tree
 
-case class IntLit(value: Int) extends Valu
-case class BooleanLit(value: Boolean) extends Valu
-case class Var(typ: Type, id: Symbol) extends Valu
+case class IntLit(value: Int) extends Value
+case class BooleanLit(value: Boolean) extends Value
+case class Var(typ: Type, id: Symbol) extends Value
 
 /**
  * Parameters
