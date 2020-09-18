@@ -71,9 +71,10 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
         "define" <+> "void" <+> "@effektMain" <> "()" <+> llvmBlock(
           "%sp = call fastcc %Sp @initializeRts()" <@>
-            // TODO generate and store topLevelCnt
             "%spp = alloca %Sp" <@>
             "store %Sp %sp, %Sp* %spp" <@@@>
+            // TODO find return type of main
+            storeCnt(PrimInt(), globalBuiltin("topLevel")) <@@@>
             jump(globalName(mainName), List())
         )
 
@@ -84,11 +85,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDoc(decl: Decl)(implicit C: LLVMContext): Doc = decl match {
     case Def(functionName, evidence, params, body) => {
-      // TODO factor out withConts
-      C.conts = List();
-      val definition = define(globalName(functionName), params.map(toDoc), toDoc(body));
-      onSeparateLines(C.conts.map(string)) <@@@>
-        definition
+      val definitions = C.withDefinitions {
+        C.emitDefinition {
+          define(globalName(functionName), params.map(toDoc), toDoc(body))
+        }
+      }
+      onSeparateLines(definitions.map(string))
     }
     case DefPrim(returnType, functionName, parameters, body) =>
       "define fastcc" <+> toDoc(returnType) <+> globalName(functionName) <>
@@ -110,30 +112,18 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case Push(param, body, rest) =>
       val contName = globalBuiltin(freshName("k"))
       val vars = freeVars(body).filterNot(_.id == param.id)
-      // TODO factor out emitDefinition
-      val contDefinition = define(contName, List(toDoc(param)),
-        // TODO factor out loadInt
-        onLines(vars.map(vari =>
-          localName(vari.id) <+> "=" <+>
-            "call fastcc %Int" <+> globalBuiltin("loadInt") <>
-            argumentList(List("%Sp* %spp")))) <@>
-          toDoc(body))
-      C.conts = pretty(contDefinition).layout :: C.conts
-      onLines(vars.map(vari =>
-        // TODO generate storeInt based on type
-        // TODO factor out storeInt
-        "call fastcc void" <+> globalBuiltin("storeInt") <>
-          argumentList(List("%Sp* %spp", toDoc(vari))))) <@>
-        // TODO generate storeCntInt based on type
-        "call fastcc void" <+> globalBuiltin("storeCntInt") <>
-        argumentList(List("%Sp* %spp", "%CntInt" <+> contName)) <@@@>
+      C.emitDefinition {
+        define(contName, List(toDoc(param)),
+          onLines(vars.map(load)) <@>
+            toDoc(body))
+      }
+      onLines(vars.map(store)) <@>
+        storeCnt(param.typ, contName) <@@@>
         toDoc(rest)
     case Ret(valu) =>
-      // TODO find type and generate loadCntInt and CntInt
-      val nextCntName = "%" <> freshName("next")
-      line <>
-        nextCntName <+> "=" <+> "call fastcc %CntInt @loadCntInt(%Sp* %spp)" <@>
-        jump(nextCntName, List(toDoc(valu)))
+      val contName = "%" <> freshName("next")
+      loadCnt(valueType(valu), contName) <@>
+        jump(contName, List(toDoc(valu)))
     case Jump(name, args) =>
       jump(globalName(name), args.map(toDoc))
     case If(cond, thn, els) =>
@@ -154,27 +144,26 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   def toDoc(value: Value)(implicit C: LLVMContext): Doc = value match {
-    case IntLit(value)     => toDoc(PrimInt()) <+> value.toString()
-    case BooleanLit(value) => toDoc(PrimBoolean()) <+> value.toString()
-    case Var(typ, name)    => toDoc(typ) <+> localName(name)
+    case IntLit(n)      => toDoc(valueType(value)) <+> n.toString()
+    case BooleanLit(b)  => toDoc(valueType(value)) <+> b.toString()
+    case Var(typ, name) => toDoc(valueType(value)) <+> localName(name)
   }
 
   def toDoc(param: Param)(implicit C: LLVMContext): Doc = param match {
     case ValueParam(typ, name) => toDoc(typ) <+> localName(name)
   }
 
-  def toDoc(typ: Type)(implicit C: LLVMContext): Doc = typ match {
-    case PrimUnit() =>
-      // TODO choose different representation for unit
-      "%Unit"
-    case PrimInt() =>
-      "%Int"
-    case PrimBoolean() =>
-      "%Boolean"
+  def valueType(value: Value): Type = value match {
+    case IntLit(_)     => PrimInt()
+    case BooleanLit(_) => PrimBoolean()
+    case Var(typ, _)   => typ
   }
 
+  def toDoc(typ: Type)(implicit C: LLVMContext): Doc =
+    "%" <> typeName(typ)
+
   def define(name: Doc, args: List[Doc], body: Doc): Doc =
-    "define fastcc void" <+> name <> argumentList("%Sp %sp" :: args) <+> llvmBlock(
+    "define fastcc void" <+> name <> argumentList("%Sp noalias %sp" :: args) <+> llvmBlock(
       "%spp = alloca %Sp" <@>
         "store %Sp %sp, %Sp* %spp" <@@@>
         body
@@ -187,17 +176,47 @@ object LLVMPrinter extends ParenPrettyPrinter {
       "ret" <+> "void"
   }
 
-  def localName(id: Symbol)(implicit C: LLVMContext): Doc =
+  def load(x: Var)(implicit C: LLVMContext): Doc =
+    // TODO generate load_Typ on demand
+    localName(x.id) <+> "=" <+> "call fastcc" <+> toDoc(x.typ) <+>
+      globalBuiltin("load" + typeName(x.typ)) <> argumentList(List("%Sp* %spp"))
+
+  def store(x: Var)(implicit C: LLVMContext): Doc =
+    // TODO generate store_Typ on demand
+    "call fastcc void" <+> globalBuiltin("store" + typeName(x.typ)) <>
+      argumentList(List("%Sp* %spp", toDoc(x)))
+
+  def loadCnt(typ: Type, contName: Doc): Doc =
+    // TODO generate Cnt_Typ and loadCnt_Typ on demand
+    contName <+> "=" <+> "call fastcc" <+> "%" <> cntTypeName(typ) <+>
+      globalBuiltin("loadCnt" + typeName(typ)) <+> argumentList(List("%Sp* %spp"))
+
+  def storeCnt(typ: Type, contName: Doc)(implicit C: LLVMContext): Doc =
+    // TODO generate storeCnt_Typ on demand
+    "call fastcc void" <+> globalBuiltin("storeCnt" + typeName(typ)) <>
+      argumentList(List("%Sp* %spp", "%" <> cntTypeName(typ) <+> contName))
+
+  def localName(id: Symbol): Doc =
     "%" <> nameDef(id)
 
-  def globalName(id: Symbol)(implicit C: LLVMContext): Doc =
+  def globalName(id: Symbol): Doc =
     "@" <> nameDef(id)
 
-  def nameDef(id: Symbol)(implicit C: LLVMContext): Doc =
+  def nameDef(id: Symbol): Doc =
     id.name.toString + "_" + id.id
 
-  def globalBuiltin(name: String)(implicit C: LLVMContext): Doc =
+  def globalBuiltin(name: String): Doc =
     "@" <> name
+
+  def typeName(typ: Type): String =
+    typ match {
+      case PrimInt()     => "Int"
+      case PrimBoolean() => "Boolean"
+      case PrimUnit()    => "Unit"
+    }
+
+  def cntTypeName(typ: Type): String =
+    "Cnt" + typeName(typ)
 
   def freshName(name: String)(implicit C: LLVMContext): String =
     name + "_" + C.fresh.next().toString()
@@ -251,7 +270,18 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   case class LLVMContext(context: Context) {
     val fresh = new Counter(0)
-    var conts: List[String] = List()
+
+    private var definitions: List[String] = List()
+
+    def emitDefinition(d: Doc): Unit =
+      this.definitions = pretty(d).layout :: this.definitions
+
+    def withDefinitions[R](block: => R): List[String] = {
+      this.definitions = List();
+      val result = block;
+      this.definitions
+    }
+
   }
 
   private implicit def asContext(C: LLVMContext): Context = C.context
