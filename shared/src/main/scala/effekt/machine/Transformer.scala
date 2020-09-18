@@ -42,6 +42,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
     stmt match {
+      case core.Val(name, bind, rest) =>
+        Push(ValueParam(transform(C.valueTypeOf(name)), name), transform(rest), transform(bind))
       case core.Ret(expr) =>
         ANF { transform(expr).map(Ret) }
       case core.If(cond, thn, els) =>

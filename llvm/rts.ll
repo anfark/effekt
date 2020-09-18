@@ -43,41 +43,64 @@ define fastcc %Stk @newStack() alwaysinline {
 }
 
 ; Generated type-specialized internal functions
+; TODO generate
 
-%Cnt1 = type void (%Sp, i64)*
-
-define fastcc %Cnt1 @loadCnt1(%Sp* %spp) alwaysinline {
+define fastcc i64 @loadInt(%Sp* %spp) alwaysinline {
     %sp    = load %Sp, %Sp* %spp
 
-    %sptocnt = bitcast %Sp %sp to %Cnt1*
-    %newsptocnt = getelementptr %Cnt1, %Cnt1* %sptocnt, i64 -1
-    %val   = load %Cnt1, %Cnt1* %newsptocnt
-    %newsp = bitcast %Cnt1* %newsptocnt to %Sp
+    %newsp = getelementptr i64, i64* %sp, i64 -1
+    %val   = load i64, i64* %newsp
 
     store %Sp %newsp, %Sp* %spp
-    ret %Cnt1 %val
+    ret i64 %val
 }
+
+define fastcc void @storeInt(%Sp* %spp, i64 %val) alwaysinline {
+    %sp   = load %Sp, %Sp* %spp
+
+    store i64 %val, i64* %sp
+    %newsp = getelementptr i64, i64* %sp, i64 1
+
+    store %Sp %newsp, %Sp* %spp
+    ret void
+}
+
+
+%CntInt = type void (%Sp, i64)*
+
+define fastcc %CntInt @loadCntInt(%Sp* %spp) alwaysinline {
+    %sp    = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %CntInt*
+    %newsptocnt = getelementptr %CntInt, %CntInt* %sptocnt, i64 -1
+    %val   = load %CntInt, %CntInt* %newsptocnt
+    %newsp = bitcast %CntInt* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret %CntInt %val
+}
+
+define fastcc void @storeCntInt(%Sp* %spp, %CntInt %val) alwaysinline {
+    %sp   = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %CntInt*
+    store %CntInt %val, %CntInt* %sptocnt
+    %newsptocnt = getelementptr %CntInt, %CntInt* %sptocnt, i64 1
+    %newsp = bitcast %CntInt* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret void
+}
+
 
 ; RTS initialization
 
-%ToplevelCnt = type void (%Sp, i64)*
-
-define fastcc void @toplevel(%Sp %sp, i64 %res) {
+define fastcc void @topLevel(%Sp %sp, i64 %res) {
     ; TODO drop last meta cont and clean up
     ret void
 }
 
-define fastcc void @storeToplevel(%Sp* %spp) alwaysinline {
-    %sp   = load %Sp, %Sp* %spp
 
-    %sptocnt = bitcast %Sp %sp to %ToplevelCnt*
-    store %ToplevelCnt @toplevel, %ToplevelCnt* %sptocnt
-    %newsptocnt = getelementptr %ToplevelCnt, %ToplevelCnt* %sptocnt, i64 1
-    %newsp = bitcast %ToplevelCnt* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret void
-}
 
 define fastcc %Sp @initializeRts() alwaysinline {
     %stk = call fastcc %Stk @newStack()
@@ -93,7 +116,7 @@ define fastcc %Sp @initializeRts() alwaysinline {
     store %BoxesSp %boxessp, %BoxesSp* @boxessp
     store %BoxesSp %boxesbase, %BoxesSp* @boxesbase
 
-    call fastcc void @storeToplevel(%Sp* %spp)
+    call fastcc void @storeCntInt(%Sp* %spp, %CntInt @topLevel)
 
     %newsp = load %Sp, %Sp* %spp
     ret %Sp %newsp

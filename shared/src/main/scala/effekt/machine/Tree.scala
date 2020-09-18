@@ -29,11 +29,13 @@ case class Include(contents: String) extends Decl
  * Statements
  */
 sealed trait Stmt extends Tree
-
+// Instructions
 case class Let(id: Symbol, bind: Expr, body: Stmt) extends Stmt
+case class Push(param: ValueParam, body: Stmt, rest: Stmt) extends Stmt
+// Terminators
 case class Ret(v: Value) extends Stmt
-case class If(cond: Value, thn: Stmt, els: Stmt) extends Stmt
 case class Jump(id: Symbol, args: List[Value]) extends Stmt
+case class If(cond: Value, thn: Stmt, els: Stmt) extends Stmt
 
 /**
  * Expressions
