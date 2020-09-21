@@ -22,15 +22,16 @@
 
 ; Foreign imports
 
-declare %Sp @malloc(i64)
-declare void @free(%Sp)
-declare void @memcpy(%Sp, %Sp, i64)
+declare i8* @malloc(i64)
+declare void @free(i8*)
+declare void @memcpy(i8*, i8*, i64)
 declare void @print(i64)
 
 ; Meta-stack management
 
 define fastcc %Stk @newStack() alwaysinline {
-    %base = call %Sp @malloc(i64 8800)
+    %area = call i8* @malloc(i64 8800)
+    %base = bitcast i8* %area to %Sp
     %boxesbase.0 = getelementptr %Word, %Word* %base, %Word 1000
     %boxesbase = bitcast %Sp %boxesbase.0 to %BoxesSp
 
@@ -46,7 +47,8 @@ define fastcc %Stk @newStack() alwaysinline {
 
 define fastcc void @topLevel(%Sp noalias %sp, i64 %res) {
     ; TODO properly clean up
-    call void @free(%Sp %sp)
+    %area = bitcast %Sp %sp to i8*
+    call void @free(i8* %area)
     ret void
 }
 
