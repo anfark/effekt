@@ -5,12 +5,16 @@ import scala.collection.mutable
 
 import effekt.context.Context
 import effekt.context.assertions.SymbolAssertions
-import effekt.symbols.{ Symbol, Name, Module, builtins }
+import effekt.symbols.{ Symbol, ValueSymbol, BlockSymbol, Name, Module, builtins }
 import effekt.util.{ Task, control }
 import effekt.util.control._
 
-case class Wildcard(module: Module) extends Symbol { val name = Name("_", module) }
-case class Tmp(module: Module) extends Symbol { val name = Name("tmp", module) }
+case class FreshValueSymbol(baseName: String, module: Module) extends ValueSymbol {
+  val name = Name(baseName, module)
+}
+case class FreshBlockSymbol(baseName: String, module: Module) extends BlockSymbol {
+  val name = Name(baseName, module)
+}
 
 class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
@@ -25,10 +29,18 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transformToplevel(stmt: core.Stmt)(implicit C: TransformerContext): List[Decl] = {
     stmt match {
-      case core.Def(blockName, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
+      case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) => {
+        // TODO make core.Def always contain BlockSymbol and also the others
         // TODO deal with evidence
-        Def(blockName, scope, params.map(transform), transform(body)) :: transformToplevel(rest)
-      case core.Def(blockName, core.Extern(params, body), rest) =>
+        val entryBlockSymbol = FreshBlockSymbol("entry", C.module);
+        Def(blockName, BlockLit(
+          params.map(transform),
+          DefLocal(entryBlockSymbol, BlockLit(List(), transform(body)),
+            Jump(entryBlockSymbol, List()))
+        )) ::
+          transformToplevel(rest)
+      }
+      case core.Def(blockName: BlockSymbol, core.Extern(params, body), rest) =>
         DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transformToplevel(rest)
       case core.Include(content, rest) =>
         Include(content) :: transformToplevel(rest)
@@ -42,15 +54,23 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def transform(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
     stmt match {
-      case core.Val(name, bind, rest) =>
+      case core.Val(name: ValueSymbol, bind, rest) =>
         Push(ValueParam(transform(C.valueTypeOf(name)), name), transform(rest), transform(bind))
       case core.Ret(expr) =>
         ANF { transform(expr).map(Ret) }
-      case core.If(cond, thn, els) =>
-        ANF { transform(cond).map(v => If(v, transform(thn), transform(els))) }
-      case core.App(core.ScopeApp(core.BlockVar(name), scope), args) =>
+      case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
+        // TODO deal with evidence
+        DefLocal(blockName, transform(block), transform(rest))
+      case core.App(core.ScopeApp(core.BlockVar(name: BlockSymbol), scope), args) =>
         // TODO deal with evidence
         ANF { sequence(args.map(transform)).map(argVals => Jump(name, argVals)) }
+      case core.If(cond, thenStmt, elseStmt) => {
+        val thenBlockName = FreshBlockSymbol("then", C.module);
+        val elseBlockName = FreshBlockSymbol("else", C.module);
+        DefLocal(thenBlockName, BlockLit(List(), transform(thenStmt)),
+          DefLocal(elseBlockName, BlockLit(List(), transform(elseStmt)),
+            ANF { transform(cond).map(v => If(v, thenBlockName, elseBlockName)) }))
+      }
       case _ =>
         println(stmt)
         C.abort("unsupported " + stmt)
@@ -63,15 +83,25 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(IntLit(value))
       case core.BooleanLit(value) =>
         pure(BooleanLit(value))
-      case core.ValueVar(name) =>
+      case core.ValueVar(name: ValueSymbol) =>
         pure(Var(transform(C.valueTypeOf(name)), name))
-      case core.PureApp(core.BlockVar(blockName), args) => for {
+      case core.PureApp(core.BlockVar(blockName: BlockSymbol), args) => for {
         argsVals <- sequence(args.map(transform))
         result <- binding(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))
       } yield result
       case _ =>
         println(expr)
         C.abort("unsupported " + expr)
+    }
+  }
+
+  def transform(block: core.Block)(implicit C: TransformerContext): BlockLit = {
+    block match {
+      case core.BlockLit(params, body) =>
+        BlockLit(params.map(transform), transform(body))
+      case _ =>
+        println(block)
+        C.abort("unsupported " + block)
     }
   }
 
@@ -85,9 +115,9 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     }
   }
 
-  def transform(param: core.Param)(implicit C: TransformerContext): Param = {
+  def transform(param: core.Param)(implicit C: TransformerContext): ValueParam = {
     param match {
-      case core.ValueParam(name) =>
+      case core.ValueParam(name: ValueSymbol) =>
         ValueParam(transform(C.valueTypeOf(name)), name)
       case _ =>
         println(param)
@@ -124,7 +154,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def binding(expr: AppPrim)(implicit C: TransformerContext): Control[Value] =
     control.use(delimiter) { k =>
-      val x = Tmp(C.module)
+      val x = FreshValueSymbol("x", C.module)
       k.apply(Var(expr.typ, x)).map(body => Let(x, expr, body))
     }
 
