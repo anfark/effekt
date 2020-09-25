@@ -31,8 +31,8 @@ case class Include(contents: String) extends Decl
 sealed trait Stmt extends Tree
 // Instructions
 case class Let(id: ValueSymbol, bind: Expr, rest: Stmt) extends Stmt
-case class Push(param: ValueParam, body: Stmt, rest: Stmt) extends Stmt
 case class DefLocal(id: BlockSymbol, block: BlockLit, rest: Stmt) extends Stmt
+case class Push(typ: Type, id: BlockSymbol, rest: Stmt) extends Stmt
 // Terminators
 case class Ret(v: Value) extends Stmt
 case class Jump(id: BlockSymbol, args: List[Value]) extends Stmt

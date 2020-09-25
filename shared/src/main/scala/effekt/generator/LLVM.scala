@@ -85,16 +85,17 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDoc(decl: Decl)(implicit C: LLVMContext): Doc = decl match {
     case Def(functionName, BlockLit(params, body)) => {
-      val definitions = C.withGlobalDefs {
-        C.emitGlobalDef {
-          define(globalName(functionName), params.map(toDoc),
-            C.withLocalDefs(body) {
-              toDoc(body) <@@@>
-                onSeparateLines(localDefsBasicBlocks())
-            })
-        }
-      };
-      onSeparateLines(definitions.map(string))
+      // TODO deal with entry block here and not in transformer
+      val (localDefs, entry) = lambdaLift(body);
+      C.localDefsSet = localDefs.keys.toSet;
+      define(globalName(functionName), params.map(toDoc),
+        toDoc(entry) <@@@>
+          onSeparateLines(localDefs.map {
+            case (blockName, BlockLit(blockParams, blockBody)) =>
+              nameDef(blockName) <> colon <@>
+                onLines(phiInstructions(blockName, blockParams, localDefs).map(toDoc)) <@>
+                toDoc(blockBody)
+          }.toList))
     }
     case DefPrim(returnType, functionName, parameters, body) =>
       "define fastcc" <+> toDoc(returnType) <+> globalName(functionName) <>
@@ -113,26 +114,21 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case Let(name, expr, body) =>
       localName(name) <+> "=" <+> toDoc(expr) <@>
         toDoc(body)
-    case Push(param, body, rest) =>
-      val contName = globalBuiltin(freshName("k"))
-      val vars = freeVars(body).filterNot(_.id == param.id)
-      // TODO account for local defs
-      C.emitGlobalDef {
-        define(contName, List(toDoc(param)),
-          onLines(vars.map(load)) <@>
-            toDoc(body))
-      }
-      onLines(vars.map(store)) <@>
-        storeCnt(param.typ, contName) <@@@>
-        toDoc(rest)
     case DefLocal(name, block, rest) =>
       toDoc(rest)
+    case Push(typ, blockName, rest) => {
+      // TODO use variables here
+      // onLines(C.freeVarsMap(blockName).map(store)) <@>
+      storeCnt(typ, globalName(blockName)) <@@@>
+        toDoc(rest)
+    }
     case Ret(valu) =>
       val contName = "%" <> freshName("next")
       loadCnt(valueType(valu), contName) <@>
         jump(contName, List(toDocWithType(valu)))
     case Jump(name, args) =>
-      if (C.getLocalDefs.isDefinedAt(name)) {
+      // TODO disambiguate during transformation
+      if (C.localDefsSet.contains(name)) {
         "br" <+> "label" <+> localName(name)
       } else {
         jump(globalName(name), args.map(toDocWithType))
@@ -145,16 +141,6 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def toDoc(expr: Expr)(implicit C: LLVMContext): Doc = expr match {
     case AppPrim(returnType, blockName, args) =>
       "call fastcc" <+> toDoc(returnType) <+> globalName(blockName) <> argumentList(args.map(toDocWithType))
-  }
-
-  // TODO find better place for this...
-  def localDefsBasicBlocks()(implicit C: LLVMContext): List[Doc] = {
-    C.getLocalDefs.toList.map {
-      case (blockName, BlockLit(params, body)) =>
-        nameDef(blockName) <> colon <@>
-          onLines(phiInstructions(C.getLocalDefs, blockName, params).map(toDoc)) <@>
-          toDoc(body)
-    }
   }
 
   def toDocWithType(value: Value)(implicit C: LLVMContext): Doc =
@@ -271,21 +257,21 @@ object LLVMPrinter extends ParenPrettyPrinter {
   val emptyline: Doc = line <> line
 
   /**
-   * Find free variables
+   * Analysis on terms
    */
 
   def freeVars(stmt: Stmt): List[Var] = stmt match {
     case Let(name, expr, rest) =>
       freeVars(expr) ++ freeVars(rest).filterNot(_.id == name)
-    case Push(param, body, rest) =>
-      freeVars(body).filterNot(_.id == param.id) ++ freeVars(rest)
     case DefLocal(name, block, rest) =>
       freeVars(block) ++ freeVars(rest)
+    case Push(_, _, rest) =>
+      freeVars(rest)
     case Ret(value) =>
       freeVars(value)
     case Jump(_, args) =>
       args.map(freeVars).flatten
-    case If(cond, thn, els) =>
+    case If(cond, thenBlock, elseBlock) =>
       freeVars(cond)
   }
   def freeVars(expr: Expr): List[Var] = expr match {
@@ -303,35 +289,30 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case b: BooleanLit => List()
   }
 
-  /**
-   * Gather local definitions
-   */
-
-  def gatherLocalDefs(stmt: Stmt): Map[BlockSymbol, BlockLit] = stmt match {
-    case Let(_, _, rest) =>
-      gatherLocalDefs(rest)
-    case Push(_, body, rest) =>
-      gatherLocalDefs(body) ++ gatherLocalDefs(rest)
-    case DefLocal(name, block, rest) =>
-      Map(name -> block) ++ gatherLocalDefs(block.body) ++ gatherLocalDefs(rest)
-    case Ret(_) =>
-      Map()
-    case Jump(_, _) =>
-      Map()
-    case If(_, _, _) =>
-      Map()
+  def lambdaLift(stmt: Stmt): (Map[BlockSymbol, BlockLit], Stmt) = stmt match {
+    case Let(x, e, rest) =>
+      val (defs, nakedRest) = lambdaLift(rest);
+      (defs, Let(x, e, nakedRest))
+    case DefLocal(name, BlockLit(params, body), rest) =>
+      val (blockDefs, nakedBody) = lambdaLift(body);
+      val (restDefs, nakedRest) = lambdaLift(rest);
+      val defs = Map(name -> BlockLit(params, nakedBody)) ++ blockDefs ++ restDefs;
+      (defs, nakedRest)
+    case Push(typ, blockName, rest) =>
+      val (defs, nakedRest) = lambdaLift(rest);
+      (defs, (Push(typ, blockName, nakedRest)))
+    case Ret(expr) =>
+      (Map(), Ret(expr))
+    case Jump(blockName, args) =>
+      (Map(), Jump(blockName, args))
+    case If(cond, thenBlockName, elseBlockName) =>
+      (Map(), If(cond, thenBlockName, elseBlockName))
   }
 
   case class Phi(param: ValueParam, args: List[(BlockSymbol, Value)])
 
-  def phiInstructions(localDefs: Map[BlockSymbol, BlockLit], blockName: BlockSymbol, params: List[ValueParam]): List[Phi] = {
-    val predecessors = localDefs.flatMap {
-      case (predecessorName, BlockLit(_, body)) =>
-        findJumpArgsTo(blockName, body).map {
-          args => (predecessorName -> args)
-        }
-    };
-    val transposedPredecessors = predecessors.toList.map {
+  def phiInstructions(blockName: BlockSymbol, params: List[ValueParam], localDefs: Map[BlockSymbol, BlockLit]): List[Phi] = {
+    val transposedPredecessors = predecessors(blockName, localDefs).map {
       case (predecessorName, args) => args.map {
         arg => (predecessorName, arg)
       }
@@ -341,18 +322,24 @@ object LLVMPrinter extends ParenPrettyPrinter {
     }
   }
 
-  def findJumpArgsTo(blockName: Symbol, stmt: Stmt): Option[List[Value]] =
+  def predecessors(calleeName: BlockSymbol, localDefs: Map[BlockSymbol, BlockLit]): List[(BlockSymbol, List[Value])] =
+    localDefs.toList.flatMap {
+      case (callerName, BlockLit(_, body)) =>
+        jumpArgsTo(calleeName, body).map(args => (callerName, args)).toList
+    }
+
+  def jumpArgsTo(calleeName: BlockSymbol, stmt: Stmt): Option[List[Value]] =
     stmt match {
       case Let(_, _, rest) =>
-        findJumpArgsTo(blockName, rest)
+        jumpArgsTo(calleeName, rest)
       case Push(_, _, rest) =>
-        findJumpArgsTo(blockName, rest)
+        jumpArgsTo(calleeName, rest)
       case DefLocal(_, _, rest) =>
-        findJumpArgsTo(blockName, rest)
+        jumpArgsTo(calleeName, rest)
       case Ret(_) =>
         None
-      case Jump(name, args) =>
-        if (name == blockName) {
+      case Jump(targetName, args) =>
+        if (targetName == calleeName) {
           Some(args)
         } else {
           None
@@ -361,6 +348,22 @@ object LLVMPrinter extends ParenPrettyPrinter {
         None
     }
 
+  // def pushedLocalDefs(stmt: Stmt): Set[BlockSymbol] =
+  //   stmt match {
+  //     case Let(_, _, rest) =>
+  //       pushedLocalDefs(rest)
+  //     case Push(name, _, rest) =>
+  //       Set(name) ++ pushedLocalDefs(rest)
+  //     case DefLocal(_, BlockLit(_, body), rest) =>
+  //       pushedLocalDefs(body) ++ pushedLocalDefs(rest)
+  //     case Ret(_) =>
+  //       Set()
+  //     case Jump(name, args) =>
+  //       Set()
+  //     case If(_, _, _) =>
+  //       Set()
+  // }
+
   /**
    * Extra info in context
    */
@@ -368,27 +371,10 @@ object LLVMPrinter extends ParenPrettyPrinter {
   case class LLVMContext(context: Context) {
     val fresh = new Counter(0)
 
-    private var globalDefs: List[String] = List()
+    var localDefsSet: Set[BlockSymbol] = Set()
 
-    def emitGlobalDef(d: Doc): Unit =
-      this.globalDefs = pretty(d).layout :: this.globalDefs
-
-    def withGlobalDefs[R](prog: => R): List[String] = {
-      this.globalDefs = List();
-      val result = prog;
-      this.globalDefs
-    }
-
-    private var localDefsMap: Map[BlockSymbol, BlockLit] = Map()
-
-    def withLocalDefs[R](stmt: Stmt)(prog: => R): R = {
-      this.localDefsMap = gatherLocalDefs(stmt)
-      prog
-    }
-
-    def getLocalDefs: Map[BlockSymbol, BlockLit] =
-      this.localDefsMap
-
+    def getLocalDefs: Set[BlockSymbol] =
+      this.localDefsSet
   }
 
   private implicit def asContext(C: LLVMContext): Context = C.context

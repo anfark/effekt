@@ -55,7 +55,12 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transform(stmt: core.Stmt)(implicit C: TransformerContext): Stmt = {
     stmt match {
       case core.Val(name: ValueSymbol, bind, rest) =>
-        Push(ValueParam(transform(C.valueTypeOf(name)), name), transform(rest), transform(bind))
+        val frameName = FreshBlockSymbol("f", C.module);
+        DefLocal(
+          frameName,
+          BlockLit(List(transform(core.ValueParam(name))), transform(rest)),
+          Push(transform(C.valueTypeOf(name)), frameName, transform(bind))
+        )
       case core.Ret(expr) =>
         ANF { transform(expr).map(Ret) }
       case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
