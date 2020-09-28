@@ -32,12 +32,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) => {
         // TODO make core.Def always contain BlockSymbol and also the others
         // TODO deal with evidence
-        val entryBlockSymbol = FreshBlockSymbol("entry", C.module);
-        Def(blockName, BlockLit(
-          params.map(transform),
-          DefLocal(entryBlockSymbol, BlockLit(List(), transform(body)),
-            Jump(entryBlockSymbol, List()))
-        )) ::
+        C.localDefsSet = Set();
+        Def(blockName, BlockLit(params.map(transform), transform(body))) ::
           transformToplevel(rest)
       }
       case core.Def(blockName: BlockSymbol, core.Extern(params, body), rest) =>
@@ -56,25 +52,36 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     stmt match {
       case core.Val(name: ValueSymbol, bind, rest) =>
         val frameName = FreshBlockSymbol("f", C.module);
+        C.localDefsSet += frameName;
         DefLocal(
           frameName,
           BlockLit(List(transform(core.ValueParam(name))), transform(rest)),
-          Push(transform(C.valueTypeOf(name)), frameName, transform(bind))
+          Push(transform(C.valueTypeOf(name)), frameName, List(), transform(bind))
         )
       case core.Ret(expr) =>
         ANF { transform(expr).map(Ret) }
       case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
         // TODO deal with evidence
+        C.localDefsSet += blockName;
         DefLocal(blockName, transform(block), transform(rest))
       case core.App(core.ScopeApp(core.BlockVar(name: BlockSymbol), scope), args) =>
         // TODO deal with evidence
-        ANF { sequence(args.map(transform)).map(argVals => Jump(name, argVals)) }
+        ANF {
+          sequence(args.map(transform)).map(argVals =>
+            if (C.localDefsSet.contains(name)) {
+              JumpLocal(name, argVals)
+            } else {
+              Jump(name, argVals)
+            })
+        }
       case core.If(cond, thenStmt, elseStmt) => {
         val thenBlockName = FreshBlockSymbol("then", C.module);
+        C.localDefsSet += thenBlockName;
         val elseBlockName = FreshBlockSymbol("else", C.module);
+        C.localDefsSet += elseBlockName;
         DefLocal(thenBlockName, BlockLit(List(), transform(thenStmt)),
           DefLocal(elseBlockName, BlockLit(List(), transform(elseStmt)),
-            ANF { transform(cond).map(v => If(v, thenBlockName, elseBlockName)) }))
+            ANF { transform(cond).map(v => If(v, thenBlockName, List(), elseBlockName, List())) }))
       }
       case _ =>
         println(stmt)
@@ -168,6 +175,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
    */
 
   case class TransformerContext(context: Context) {
+    var localDefsSet: Set[BlockSymbol] = Set()
+
+    def getLocalDefs: Set[BlockSymbol] =
+      this.localDefsSet
   }
 
   private implicit def asContext(C: TransformerContext): Context = C.context
