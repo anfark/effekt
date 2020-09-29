@@ -74,7 +74,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
             "%spp = alloca %Sp" <@>
             "store %Sp %sp, %Sp* %spp" <@@@>
             // TODO find return type of main
-            storeCnt(PrimInt(), globalBuiltin("topLevel")) <@@@>
+            storeCnt("%spp", PrimInt(), globalBuiltin("topLevel")) <@@@>
             jump(globalName(mainName), List())
         )
 
@@ -89,14 +89,14 @@ object LLVMPrinter extends ParenPrettyPrinter {
       val (localDefs, entry) = blockFloat(parameterLift(body));
 
       val globalDefinitions = onSeparateLines {
-        pushedLocalDefs(body).map { blockName =>
+        findGlobalDefs(body).map { blockName =>
 
           val blockParams = localDefs(blockName).params;
           val freshVarNames: List[Var] = blockParams.map { param =>
             Var(param.typ, FreshValueSymbol(param.id.name.name, C.module))
           };
           val freshParamNames = freshVarNames.take(1).map {
-            v => ValueParam(v.typ, v.id)
+            v => Param(v.typ, v.id)
           };
 
           val entryBlockName: BlockSymbol = FreshBlockSymbol("entry", C.module);
@@ -151,7 +151,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
       "define fastcc" <+> toDoc(returnType) <+> globalName(functionName) <>
         // we can't use unique id here, since we do not know it in the extern string.
         argumentList(parameters.map {
-          case ValueParam(typ, id) => toDoc(typ) <+> "%" <> id.name.toString()
+          case Param(typ, id) => toDoc(typ) <+> "%" <> id.name.toString()
         }) <+>
         "alwaysinline" <+> llvmBlock(
           string(body)
@@ -166,14 +166,39 @@ object LLVMPrinter extends ParenPrettyPrinter {
         toDoc(body)
     case DefLocal(name, block, rest) =>
       toDoc(rest)
-    case Push(typ, blockName, freeVars, rest) => {
-      onLines(freeVars.map(store)) <@>
-        storeCnt(typ, globalName(blockName)) <@@@>
+    case Push(typ, blockName, freeVars, rest) =>
+      onLines(freeVars.map(store("%spp", _))) <@>
+        storeCnt("%spp", typ, globalName(blockName)) <@@@>
         toDoc(rest)
-    }
+    case NewStack(stackName, blockName, args, rest) =>
+      // TODO deal with closed-over values...
+      // TODO clean up generation
+      val tmpSpBefore = freshLocalName("tmpsp");
+      val tmpSpp = freshLocalName("tmpspp");
+      val tmpStk = freshLocalName("tmpstk");
+      val tmpSpAfter = freshLocalName("tmpsp");
+      tmpStk <+> "=" <+> "call fastcc %Stk" <+> globalBuiltin("newStack") <> argumentList(List()) <@>
+        // TODO careful, this 0 here expects the sp to be the first element
+        tmpSpBefore <+> "=" <+> "extractvalue %Stk" <+> tmpStk <> ", 0" <@>
+        tmpSpp <+> "=" <+> "alloca %Sp" <@>
+        "store %Sp" <+> tmpSpBefore <+> ", %Sp*" <+> tmpSpp <@>
+        // TODO find type of stored cnt
+        storeCnt(tmpSpp, PrimInt(), globalName(blockName)) <@>
+        tmpSpAfter <+> "=" <+> "load %Sp, %Sp*" <+> tmpSpp <@>
+        localName(stackName) <+> "=" <+> "insertvalue %Stk" <+> tmpStk <> ", %Sp" <+> tmpSpAfter <> ", 0" <@@@>
+        toDoc(rest)
+    case PushStack(stack, rest) =>
+      "call fastcc void" <+> globalBuiltin("pushStack") <>
+        argumentList(List("%Sp* %spp", toDocWithType(stack))) <@@@>
+        toDoc(rest)
+    case PopStack(stackName, rest) =>
+      localName(stackName) <+> "=" <+>
+        "call fastcc %Stk" <+> globalBuiltin("popStack") <>
+        argumentList(List("%Sp* %spp")) <@@@>
+        toDoc(rest)
     case Ret(valu) =>
-      val contName = "%" <> freshName("next")
-      loadCnt(valueType(valu), contName) <@>
+      val contName = freshLocalName("next")
+      loadCnt("%spp", valueType(valu), contName) <@>
         jump(contName, List(toDocWithType(valu)))
     case Jump(name, args) =>
       jump(globalName(name), args.map(toDocWithType))
@@ -198,8 +223,8 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case Var(typ, name) => localName(name)
   }
 
-  def toDoc(param: ValueParam)(implicit C: LLVMContext): Doc = param match {
-    case ValueParam(typ, name) => toDoc(typ) <+> localName(name)
+  def toDoc(param: Param)(implicit C: LLVMContext): Doc = param match {
+    case Param(typ, name) => toDoc(typ) <+> localName(name)
   }
 
   def valueType(value: Value): Type = value match {
@@ -213,7 +238,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDoc(phi: Phi)(implicit C: LLVMContext): Doc =
     phi match {
-      case Phi(ValueParam(typ, name), args) => {
+      case Phi(Param(typ, name), args) => {
         localName(name) <+> "=" <+> "phi" <+> toDoc(typ) <+>
           hsep(args.toList.map {
             case (label, value) =>
@@ -224,9 +249,15 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def toDocBasicBlock(blockName: BlockSymbol, blockBody: Stmt, phiInstructionsMap: Map[BlockSymbol, List[Phi]], loadInstructionsMap: Map[BlockSymbol, List[Var]])(implicit C: LLVMContext): Doc = {
     // TODO merge phi instructions and load instructions into same map
+    val phiInstructions = onLines(
+      phiInstructionsMap.getOrElse(blockName, List()).map(toDoc)
+    );
+    val loadInstructions = onLines(
+      loadInstructionsMap.getOrElse(blockName, List()).reverse.map(load("%spp", _))
+    );
     nameDef(blockName) <> colon <@>
-      onLines(phiInstructionsMap.getOrElse(blockName, List()).map(toDoc)) <@>
-      onLines(loadInstructionsMap.getOrElse(blockName, List()).reverse.map(load)) <@>
+      phiInstructions <@>
+      loadInstructions <@>
       toDoc(blockBody)
 
   }
@@ -244,31 +275,33 @@ object LLVMPrinter extends ParenPrettyPrinter {
       )
 
   def jump(name: Doc, args: List[Doc])(implicit C: LLVMContext): Doc = {
-    val newspName = "%" <> freshName("newsp")
+    val newspName = freshLocalName("newsp")
     newspName <+> "=" <+> "load %Sp, %Sp* %spp" <@>
       "tail call fastcc void" <+> name <> argumentList(("%Sp" <+> newspName) :: args) <@>
       "ret" <+> "void"
   }
 
-  def load(x: Var)(implicit C: LLVMContext): Doc =
+  def load(sppName: Doc, x: Var)(implicit C: LLVMContext): Doc =
     // TODO generate load_Typ on demand
     localName(x.id) <+> "=" <+> "call fastcc" <+> toDoc(x.typ) <+>
-      globalBuiltin("load" + typeName(x.typ)) <> argumentList(List("%Sp* %spp"))
+      globalBuiltin("load" + typeName(x.typ)) <>
+      argumentList(List("%Sp*" <+> sppName))
 
-  def store(v: Value)(implicit C: LLVMContext): Doc =
+  def store(sppName: Doc, v: Value)(implicit C: LLVMContext): Doc =
     // TODO generate store_Typ on demand
     "call fastcc void" <+> globalBuiltin("store" + typeName((valueType(v)))) <>
-      argumentList(List("%Sp* %spp", toDocWithType(v)))
+      argumentList(List("%Sp*" <+> sppName, toDocWithType(v)))
 
-  def loadCnt(typ: Type, contName: Doc): Doc =
+  def loadCnt(sppName: Doc, typ: Type, contName: Doc): Doc =
     // TODO generate Cnt_Typ and loadCnt_Typ on demand
     contName <+> "=" <+> "call fastcc" <+> "%" <> cntTypeName(typ) <+>
-      globalBuiltin("loadCnt" + typeName(typ)) <+> argumentList(List("%Sp* %spp"))
+      globalBuiltin("loadCnt" + typeName(typ)) <+>
+      argumentList(List("%Sp*" <+> sppName))
 
-  def storeCnt(typ: Type, contName: Doc)(implicit C: LLVMContext): Doc =
+  def storeCnt(sppName: Doc, typ: Type, contName: Doc)(implicit C: LLVMContext): Doc =
     // TODO generate storeCnt_Typ on demand
     "call fastcc void" <+> globalBuiltin("storeCnt" + typeName(typ)) <>
-      argumentList(List("%Sp* %spp", "%" <> cntTypeName(typ) <+> contName))
+      argumentList(List("%Sp*" <+> sppName, "%" <> cntTypeName(typ) <+> contName))
 
   def localName(id: Symbol): Doc =
     "%" <> nameDef(id)
@@ -287,13 +320,14 @@ object LLVMPrinter extends ParenPrettyPrinter {
       case PrimInt()     => "Int"
       case PrimBoolean() => "Boolean"
       case PrimUnit()    => "Unit"
+      case Stack(_)      => "Stk"
     }
 
   def cntTypeName(typ: Type): String =
     "Cnt" + typeName(typ)
 
-  def freshName(name: String)(implicit C: LLVMContext): String =
-    name + "_" + C.fresh.next().toString()
+  def freshLocalName(name: String)(implicit C: LLVMContext): String =
+    "%" + name + "_" + C.fresh.next().toString()
 
   def llvmBlock(content: Doc): Doc = braces(nest(line <> content) <> line)
 
@@ -322,6 +356,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
       freeVars(block) ++ freeVars(rest)
     case Push(_, _, args, rest) =>
       args.flatMap(freeVars).toSet ++ freeVars(rest)
+    case NewStack(stackName, blockName, args, rest) =>
+      args.flatMap(freeVars).toSet ++ freeVars(rest).filterNot(_.id == stackName)
+    case PushStack(stack, rest) =>
+      freeVars(stack) ++ freeVars(rest)
+    case PopStack(stackName, rest) =>
+      freeVars(rest).filterNot(_.id == stackName)
     case Ret(value) =>
       freeVars(value)
     case Jump(_, args) =>
@@ -346,7 +386,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case b: BooleanLit => Set()
   }
 
-  def substitute(mapping: Map[ValueSymbol, Value], stmt: Stmt): Stmt = stmt match {
+  def substitute(mapping: Map[Symbol, Value], stmt: Stmt): Stmt = stmt match {
     case Let(x, expr, rest) =>
       Let(x, substitute(mapping, expr), substitute(mapping, rest))
     case DefLocal(blockName, BlockLit(params, body), rest) =>
@@ -354,6 +394,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
         substitute(mapping, rest))
     case Push(typ, blockName, blockArgs, rest) =>
       Push(typ, blockName, blockArgs.map(substitute(mapping, _)), substitute(mapping, rest))
+    case NewStack(stackName, blockName, args, rest) =>
+      NewStack(stackName, blockName, args.map(substitute(mapping, _)), substitute(mapping, rest))
+    case PushStack(stack, rest) =>
+      PushStack(substitute(mapping, stack), substitute(mapping, rest))
+    case PopStack(stackName, rest) =>
+      PopStack(stackName, substitute(mapping, rest))
     case Ret(expr) =>
       Ret(substitute(mapping, expr))
     case Jump(blockName, blockArgs) =>
@@ -368,12 +414,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
       )
   }
 
-  def substitute(mapping: Map[ValueSymbol, Value], expr: Expr): Expr = expr match {
+  def substitute(mapping: Map[Symbol, Value], expr: Expr): Expr = expr match {
     case AppPrim(typ, blockName, args) =>
       AppPrim(typ, blockName, args.map(substitute(mapping, _)))
   }
 
-  def substitute(mapping: Map[ValueSymbol, Value], value: Value): Value = value match {
+  def substitute(mapping: Map[Symbol, Value], value: Value): Value = value match {
     case IntLit(n)      => IntLit(n)
     case BooleanLit(b)  => BooleanLit(b)
     case Var(typ, name) => mapping.getOrElse(name, Var(typ, name))
@@ -386,7 +432,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
       val vars = freeVars(BlockLit(params, body)).toList
       val freshVars = vars.map(v =>
         Var(v.typ, FreshValueSymbol(v.id.name.name, C.module)));
-      val freshParams = freshVars.map { v => ValueParam(v.typ, v.id) }
+      val freshParams = freshVars.map { v => Param(v.typ, v.id) }
       val mapping = vars.map(_.id).zip(freshVars).toMap;
       DefLocal(name, BlockLit(
         params ++ freshParams,
@@ -395,6 +441,12 @@ object LLVMPrinter extends ParenPrettyPrinter {
         parameterLift(addArguments(name, vars, rest)))
     case Push(typ, blockName, blockArgs, rest) =>
       Push(typ, blockName, blockArgs, parameterLift(rest))
+    case NewStack(stackName, blockName, args, rest) =>
+      NewStack(stackName, blockName, args, parameterLift(rest))
+    case PushStack(stack, rest) =>
+      PushStack(stack, parameterLift(rest))
+    case PopStack(stackName, rest) =>
+      PopStack(stackName, parameterLift(rest))
     case Ret(expr) =>
       Ret(expr)
     case Jump(blockName, args) =>
@@ -418,6 +470,13 @@ object LLVMPrinter extends ParenPrettyPrinter {
       case Push(typ, blockName, blockArgs, rest) =>
         val newArgs = if (blockName == name) { args } else { List() };
         Push(typ, blockName, blockArgs ++ newArgs, addArguments(name, args, rest))
+      case NewStack(stackName, blockName, blockArgs, rest) =>
+        val newArgs = if (blockName == name) { args } else { List() };
+        NewStack(stackName, blockName, blockArgs ++ newArgs, addArguments(name, args, rest))
+      case PushStack(stack, rest) =>
+        PushStack(stack, addArguments(name, args, rest))
+      case PopStack(stackName, rest) =>
+        PopStack(stackName, addArguments(name, args, rest))
       case Ret(expr) =>
         Ret(expr)
       case Jump(blockName, blockArgs) =>
@@ -448,6 +507,15 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case Push(typ, blockName, blockArgs, rest) =>
       val (defs, nakedRest) = blockFloat(rest);
       (defs, (Push(typ, blockName, blockArgs, nakedRest)))
+    case NewStack(stackName, blockName, args, rest) =>
+      val (defs, nakedRest) = blockFloat(rest);
+      (defs, (NewStack(stackName, blockName, args, nakedRest)))
+    case PushStack(stack, rest) =>
+      val (defs, nakedRest) = blockFloat(rest);
+      (defs, (PushStack(stack, nakedRest)))
+    case PopStack(stackName, rest) =>
+      val (defs, nakedRest) = blockFloat(rest);
+      (defs, (PopStack(stackName, nakedRest)))
     case Ret(expr) =>
       (Map(), Ret(expr))
     case Jump(blockName, args) =>
@@ -458,11 +526,11 @@ object LLVMPrinter extends ParenPrettyPrinter {
       (Map(), If(cond, thenBlockName, thenArgs, elseBlockName, elseArgs))
   }
 
-  case class Phi(param: ValueParam, args: List[(BlockSymbol, Value)])
+  case class Phi(param: Param, args: List[(BlockSymbol, Value)])
 
   def findPhiInstructions(basicBlocks: Map[BlockSymbol, BlockLit]): Map[BlockSymbol, List[Phi]] = {
     import scala.collection.mutable
-    type PhiMap = mutable.Map[ValueParam, List[(BlockSymbol, Value)]]
+    type PhiMap = mutable.Map[Param, List[(BlockSymbol, Value)]]
     type PhiDB = mutable.Map[BlockSymbol, PhiMap]
     val phiDB: PhiDB = mutable.Map.empty
     for {
@@ -482,9 +550,15 @@ object LLVMPrinter extends ParenPrettyPrinter {
     stmt match {
       case Let(_, _, rest) =>
         localJumpTargets(rest)
+      case DefLocal(_, _, rest) =>
+        localJumpTargets(rest)
       case Push(_, _, _, rest) =>
         localJumpTargets(rest)
-      case DefLocal(_, _, rest) =>
+      case NewStack(_, _, _, rest) =>
+        localJumpTargets(rest)
+      case PushStack(_, rest) =>
+        localJumpTargets(rest)
+      case PopStack(_, rest) =>
         localJumpTargets(rest)
       case Ret(_) =>
         Map()
@@ -511,19 +585,25 @@ object LLVMPrinter extends ParenPrettyPrinter {
     reachableBasicBlocks
   }
 
-  def pushedLocalDefs(stmt: Stmt): Set[BlockSymbol] =
+  def findGlobalDefs(stmt: Stmt): Set[BlockSymbol] =
     stmt match {
       case Let(_, _, rest) =>
-        pushedLocalDefs(rest)
-      case Push(_, name, args, rest) =>
-        Set(name) ++ pushedLocalDefs(rest)
+        findGlobalDefs(rest)
+      case Push(_, name, _, rest) =>
+        Set(name) ++ findGlobalDefs(rest)
+      case NewStack(_, name, _, rest) =>
+        Set(name) ++ findGlobalDefs(rest)
+      case PushStack(_, rest) =>
+        findGlobalDefs(rest)
+      case PopStack(_, rest) =>
+        findGlobalDefs(rest)
       case DefLocal(_, BlockLit(_, body), rest) =>
-        pushedLocalDefs(body) ++ pushedLocalDefs(rest)
+        findGlobalDefs(body) ++ findGlobalDefs(rest)
       case Ret(_) =>
         Set()
-      case Jump(name, args) =>
+      case Jump(_, _) =>
         Set()
-      case JumpLocal(name, args) =>
+      case JumpLocal(_, _) =>
         Set()
       case If(_, _, _, _, _) =>
         Set()

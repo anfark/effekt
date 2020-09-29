@@ -2,7 +2,7 @@ package effekt
 package machine
 
 import effekt.context.Context
-import effekt.symbols.{ NoName, QualifiedName, ValueSymbol, BlockSymbol }
+import effekt.symbols.{ NoName, QualifiedName, Symbol, ValueSymbol, BlockSymbol }
 
 sealed trait Tree extends Product {
   def inheritPosition(from: source.Tree)(implicit C: Context): this.type = {
@@ -22,7 +22,8 @@ case class ModuleDecl(path: String, imports: List[String], decls: List[Decl]) ex
 sealed trait Decl extends Tree
 
 case class Def(id: BlockSymbol, block: BlockLit) extends Decl
-case class DefPrim(typ: Type, id: BlockSymbol, params: List[ValueParam], body: String) extends Decl
+// TODO is it sensible for prims to accept blocks?
+case class DefPrim(typ: Type, id: BlockSymbol, params: List[Param], body: String) extends Decl
 case class Include(contents: String) extends Decl
 
 /**
@@ -33,6 +34,9 @@ sealed trait Stmt extends Tree
 case class Let(id: ValueSymbol, bind: Expr, rest: Stmt) extends Stmt
 case class DefLocal(id: BlockSymbol, block: BlockLit, rest: Stmt) extends Stmt
 case class Push(typ: Type, id: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
+case class NewStack(id: BlockSymbol, blockName: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
+case class PushStack(stack: Value, rest: Stmt) extends Stmt
+case class PopStack(id: BlockSymbol, rest: Stmt) extends Stmt
 // Terminators
 case class Ret(v: Value) extends Stmt
 case class Jump(id: BlockSymbol, args: List[Value]) extends Stmt
@@ -49,7 +53,7 @@ case class AppPrim(typ: Type, id: BlockSymbol, args: List[Value]) extends Expr
 /**
  * Blocks
  */
-case class BlockLit(params: List[ValueParam], body: Stmt)
+case class BlockLit(params: List[Param], body: Stmt)
 
 /**
  * Values
@@ -58,12 +62,14 @@ sealed trait Value extends Tree
 
 case class IntLit(value: Int) extends Value
 case class BooleanLit(value: Boolean) extends Value
-case class Var(typ: Type, id: ValueSymbol) extends Value
+// Refers to values and stack are values
+// TODO Change this symbol back to value symbol.... but what about block parameters?
+case class Var(typ: Type, id: Symbol) extends Value
 
 /**
  * Parameters
  */
-case class ValueParam(typ: Type, id: ValueSymbol)
+case class Param(typ: Type, id: Symbol) extends Tree
 
 /**
  * Types
@@ -73,4 +79,5 @@ sealed trait Type extends Tree
 case class PrimUnit() extends Type
 case class PrimInt() extends Type
 case class PrimBoolean() extends Type
+case class Stack(typ: Type) extends Type
 

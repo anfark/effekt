@@ -5,7 +5,7 @@ import scala.collection.mutable
 
 import effekt.context.Context
 import effekt.context.assertions.SymbolAssertions
-import effekt.symbols.{ Symbol, ValueSymbol, BlockSymbol, Name, Module, builtins }
+import effekt.symbols.{ Symbol, ValueSymbol, BlockSymbol, Name, Module, builtins, / }
 import effekt.util.{ Task, control }
 import effekt.util.control._
 
@@ -33,6 +33,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         // TODO make core.Def always contain BlockSymbol and also the others
         // TODO deal with evidence
         C.localDefsSet = Set();
+        C.blockParamsSet = params.flatMap {
+          case core.BlockParam(name: BlockSymbol) => Some(name)
+          case _ => None
+        }.toSet
         Def(blockName, BlockLit(params.map(transform), transform(body))) ::
           transformToplevel(rest)
       }
@@ -62,6 +66,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         ANF { transform(expr).map(Ret) }
       case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
         // TODO deal with evidence
+        // TODO change block params set for local defs too
         C.localDefsSet += blockName;
         DefLocal(blockName, transform(block), transform(rest))
       case core.App(core.ScopeApp(core.BlockVar(name: BlockSymbol), scope), args) =>
@@ -71,7 +76,19 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
             if (C.localDefsSet.contains(name)) {
               JumpLocal(name, argVals)
             } else {
-              Jump(name, argVals)
+              if (C.blockParamsSet.contains(name)) {
+                // TODO support multi-parameter function arguments
+                argVals match {
+                  case List(argVal) =>
+                    // TODO find actual type of stack var
+                    PushStack(Var(Stack(PrimInt()), name), Ret(argVal))
+                  case _ =>
+                    println(argVals)
+                    C.abort("unsupported " + argVals)
+                }
+              } else {
+                Jump(name, argVals)
+              }
             })
         }
       case core.If(cond, thenStmt, elseStmt) => {
@@ -99,7 +116,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(Var(transform(C.valueTypeOf(name)), name))
       case core.PureApp(core.BlockVar(blockName: BlockSymbol), args) => for {
         argsVals <- sequence(args.map(transform))
-        result <- binding(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))
+        result <- bindingValue(AppPrim(transform(returnTypeOf(blockName)), blockName, argsVals))
       } yield result
       case _ =>
         println(expr)
@@ -121,16 +138,21 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     arg match {
       case expr: core.Expr =>
         transform(expr)
+      case core.ScopeAbs(_, block) =>
+        // TODO This seems to overlap, move this elsewhere?
+        bindingStack(transform(block))
       case _ =>
         println(arg)
         C.abort("unsupported " + arg)
     }
   }
 
-  def transform(param: core.Param)(implicit C: TransformerContext): ValueParam = {
+  def transform(param: core.Param)(implicit C: TransformerContext): Param = {
     param match {
       case core.ValueParam(name: ValueSymbol) =>
-        ValueParam(transform(C.valueTypeOf(name)), name)
+        Param(transform(C.valueTypeOf(name)), name)
+      case core.BlockParam(name: BlockSymbol) =>
+        Param(transform(C.blockTypeOf(name)), name)
       case _ =>
         println(param)
         C.abort("unsupported " + param)
@@ -145,6 +167,12 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         PrimInt()
       case symbols.BuiltinType(builtins.TBoolean.name, List()) =>
         PrimBoolean()
+      // TODO do we only use this function on parameter types?
+      // TODO generics
+      // TODO parameter sections?
+      // TODO capabilities?
+      case symbols.BlockType(_, List(List(typ)), ret / _) =>
+        Stack(transform(typ))
       case _ =>
         println(typ)
         C.abort("unsupported " + typ)
@@ -164,10 +192,24 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   def ANF(e: Control[Stmt]): Stmt = control.handle(delimiter)(e).run()
 
-  def binding(expr: AppPrim)(implicit C: TransformerContext): Control[Value] =
-    control.use(delimiter) { k =>
+  def bindingValue(expr: AppPrim)(implicit C: TransformerContext): Control[Value] =
+    control.use(delimiter) { resume =>
       val x = FreshValueSymbol("x", C.module)
-      k.apply(Var(expr.typ, x)).map(body => Let(x, expr, body))
+      resume.apply(Var(expr.typ, x)).map(rest => Let(x, expr, rest))
+    }
+
+  def bindingStack(block: BlockLit)(implicit C: TransformerContext): Control[Value] =
+    control.use(delimiter) { resume =>
+      val f = FreshBlockSymbol("f", C.module)
+      val k = FreshBlockSymbol("k", C.module)
+      val u = FreshBlockSymbol("u", C.module)
+      // TODO find actual type of stack
+      block match {
+        case BlockLit(params, body) =>
+          resume.apply(Var(Stack(PrimInt()), k)).map(rest =>
+            DefLocal(f, BlockLit(params, PopStack(u, body)),
+              NewStack(k, f, List(), rest)))
+      }
     }
 
   /**
@@ -176,9 +218,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
 
   case class TransformerContext(context: Context) {
     var localDefsSet: Set[BlockSymbol] = Set()
-
-    def getLocalDefs: Set[BlockSymbol] =
-      this.localDefsSet
+    var blockParamsSet: Set[BlockSymbol] = Set()
   }
 
   private implicit def asContext(C: TransformerContext): Context = C.context
