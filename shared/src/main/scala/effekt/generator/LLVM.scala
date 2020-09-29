@@ -461,38 +461,21 @@ object LLVMPrinter extends ParenPrettyPrinter {
   case class Phi(param: ValueParam, args: List[(BlockSymbol, Value)])
 
   def findPhiInstructions(basicBlocks: Map[BlockSymbol, BlockLit]): Map[BlockSymbol, List[Phi]] = {
-
-    val predecessorsMap = gather(basicBlocks.toList.flatMap {
-      case (callerName, BlockLit(_, blockBody)) =>
-        localJumpTargets(blockBody).map {
-          case (calleeName, args) =>
-            val params = basicBlocks(calleeName).params;
-            (calleeName, (callerName, params.zip(args).toMap))
-        }
-    });
-
-    val phiInstructionsMap: Map[BlockSymbol, List[Phi]] =
-      predecessorsMap.view.mapValues {
-        case calledFromMap =>
-          transpose(calledFromMap).map {
-            case (param, args) => Phi(param, args.toList)
-          }.toList
-      }.toMap;
-
-    phiInstructionsMap
-  }
-
-  def gather[K, V](entries: Iterable[(K, V)]): Map[K, Iterable[V]] = {
-    entries.groupMap(x => x._1)(x => x._2)
-  }
-
-  def transpose[K1, K2, V](nested: Iterable[(K1, Iterable[(K2, V)])]): Map[K2, Iterable[(K1, V)]] = {
-    val triples = nested.flatMap {
-      case (k1, inner) => inner.map {
-        case (k2, v) => (k1, k2, v)
-      }
-    }
-    triples.groupMap(x => x._2)(x => (x._1, x._3))
+    import scala.collection.mutable
+    type PhiMap = mutable.Map[ValueParam, List[(BlockSymbol, Value)]]
+    type PhiDB = mutable.Map[BlockSymbol, PhiMap]
+    val phiDB: PhiDB = mutable.Map.empty
+    for {
+      (caller, BlockLit(_, blockBody)) <- basicBlocks
+      (callee, args) <- localJumpTargets(blockBody)
+      phiMap = phiDB.getOrElseUpdate(callee, mutable.Map.empty)
+      calleeParams = basicBlocks(callee).params
+      (param, arg) <- calleeParams zip args
+      callers = phiMap.getOrElse(param, Nil)
+    } phiMap.put(param, (caller, arg) :: callers)
+    phiDB.map {
+      case (callee, phis) => (callee, phis.map { Phi.tupled }.toList)
+    }.toMap
   }
 
   def localJumpTargets(stmt: Stmt): Map[BlockSymbol, List[Value]] =
@@ -516,6 +499,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def reachableBasicBlocks(entryBlockName: BlockSymbol, basicBlocks: Map[BlockSymbol, BlockLit]): Map[BlockSymbol, BlockLit] = {
 
+    // TODO do this transitively
     val reachableBlocksSet: Set[BlockSymbol] = basicBlocks.flatMap {
       case (_, BlockLit(_, body)) => localJumpTargets(body).keys
     }.toSet + entryBlockName
