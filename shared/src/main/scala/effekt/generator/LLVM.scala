@@ -582,10 +582,14 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
   def reachableBasicBlocks(entryBlockName: BlockSymbol, basicBlocks: Map[BlockSymbol, BlockLit]): Map[BlockSymbol, BlockLit] = {
 
-    // TODO do this transitively
-    val reachableBlocksSet: Set[BlockSymbol] = basicBlocks.flatMap {
-      case (_, BlockLit(_, body)) => localJumpTargets(body).keys
-    }.toSet + entryBlockName
+    var reachableBlocksSet: Set[BlockSymbol] = Set();
+    def go(blockName: BlockSymbol): Unit = {
+      if (!reachableBlocksSet.contains(blockName)) {
+        reachableBlocksSet += blockName;
+        localJumpTargets(basicBlocks(blockName).body).keys.foreach(go);
+      }
+    };
+    go(entryBlockName);
 
     val reachableBasicBlocks = basicBlocks.view.filterKeys { blockName =>
       reachableBlocksSet.contains(blockName)
