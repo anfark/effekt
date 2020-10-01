@@ -168,7 +168,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case DefLocal(name, block, rest) =>
       toDoc(rest)
     case PushFrame(cntType, blockName, freeVars, rest) =>
-      onLines(freeVars.map(store("%spp", _))) <@>
+      store("%spp", freeVars) <@>
         storeCnt("%spp", cntType, globalName(blockName)) <@@@>
         toDoc(rest)
     case NewStack(cntType, stackName, blockName, args, rest) =>
@@ -183,7 +183,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
         tmpSpBefore <+> "=" <+> "extractvalue %Stk" <+> tmpStk <> ", 0" <@>
         tmpSpp <+> "=" <+> "alloca %Sp" <@>
         "store %Sp" <+> tmpSpBefore <+> ", %Sp*" <+> tmpSpp <@>
-        onLines(args.map(store(tmpSpp, _))) <@>
+        store(tmpSpp, args) <@>
         storeCnt(tmpSpp, cntType, globalName(blockName)) <@>
         tmpSpAfter <+> "=" <+> "load %Sp, %Sp*" <+> tmpSpp <@>
         localName(stackName) <+> "=" <+> "insertvalue %Stk" <+> tmpStk <> ", %Sp" <+> tmpSpAfter <> ", 0" <@@@>
@@ -253,9 +253,8 @@ object LLVMPrinter extends ParenPrettyPrinter {
     val phiInstructions = onLines(
       phiInstructionsMap.getOrElse(blockName, List()).map(toDoc)
     );
-    val loadInstructions = onLines(
-      loadInstructionsMap.getOrElse(blockName, List()).reverse.map(load("%spp", _))
-    );
+    val loadInstructions =
+      load("%spp", loadInstructionsMap.getOrElse(blockName, List()));
     nameDef(blockName) <> colon <@>
       phiInstructions <@>
       loadInstructions <@>
@@ -282,27 +281,36 @@ object LLVMPrinter extends ParenPrettyPrinter {
       "ret" <+> "void"
   }
 
-  def load(sppName: Doc, x: Var)(implicit C: LLVMContext): Doc =
-    // TODO generate load_Typ on demand
-    localName(x.id) <+> "=" <+> "call fastcc" <+> toDoc(x.typ) <+>
-      globalBuiltin("load" + typeName(x.typ)) <>
-      argumentList(List("%Sp*" <+> sppName))
+  def load(sppName: Doc, vars: List[Var])(implicit C: LLVMContext): Doc =
+    // TODO load all variables at once
+    onLines {
+      vars.reverse.map(x =>
+        localName(x.id) <+> "=" <+> "call fastcc" <+> toDoc(x.typ) <+>
+          globalBuiltin("load" + typeName(x.typ)) <>
+          argumentList(List("%Sp*" <+> sppName)))
+    }
 
-  def store(sppName: Doc, v: Value)(implicit C: LLVMContext): Doc =
-    // TODO generate store_Typ on demand
-    "call fastcc void" <+> globalBuiltin("store" + typeName((valueType(v)))) <>
-      argumentList(List("%Sp*" <+> sppName, toDocWithType(v)))
+  def store(sppName: Doc, values: List[Value])(implicit C: LLVMContext): Doc =
+    // TODO store all values at once
+    onLines {
+      values.map(value =>
+        "call fastcc void" <+> globalBuiltin("store" + typeName((valueType(value)))) <>
+          argumentList(List("%Sp*" <+> sppName, toDocWithType(value))))
+    }
 
-  def loadCnt(sppName: Doc, cntType: List[Type], contName: Doc): Doc =
-    // TODO generate Cnt_Typ and loadCnt_Typ on demand
-    contName <+> "=" <+> "call fastcc" <+> "%" <> cntTypeName(cntType) <+>
-      globalBuiltin("load" + cntTypeName(cntType)) <+>
-      argumentList(List("%Sp*" <+> sppName))
+  def loadCnt(sppName: Doc, cntType: List[Type], contName: Doc)(implicit C: LLVMContext): Doc = {
+    val tmpCnt = freshLocalName("tmpCnt");
+    tmpCnt <+> "=" <+> "call fastcc" <+> "%Cnt" <+> globalBuiltin("loadCnt") <+>
+      argumentList(List("%Sp*" <+> sppName)) <@>
+      contName <+> "=" <+> "bitcast %Cnt" <+> tmpCnt <+> "to" <+> cntTypeDoc(cntType)
+  }
 
-  def storeCnt(sppName: Doc, cntType: List[Type], contName: Doc)(implicit C: LLVMContext): Doc =
-    // TODO generate storeCnt_Typ on demand
-    "call fastcc void" <+> globalBuiltin("store" + cntTypeName(cntType)) <>
-      argumentList(List("%Sp*" <+> sppName, "%" <> cntTypeName(cntType) <+> contName))
+  def storeCnt(sppName: Doc, cntType: List[Type], contName: Doc)(implicit C: LLVMContext): Doc = {
+    val tmpCnt = freshLocalName("tmpCnt");
+    tmpCnt <+> "=" <+> "bitcast" <+> cntTypeDoc(cntType) <+> contName <+> "to" <+> "%Cnt" <@>
+      "call fastcc void" <+> globalBuiltin("storeCnt") <>
+      argumentList(List("%Sp*" <+> sppName, "%Cnt" <+> tmpCnt))
+  }
 
   def localName(id: Symbol): Doc =
     "%" <> nameDef(id)
@@ -324,8 +332,8 @@ object LLVMPrinter extends ParenPrettyPrinter {
       case Stack(_)      => "Stk"
     }
 
-  def cntTypeName(cntType: List[Type]): String =
-    "Cnt" + cntType.map(typeName(_)).mkString
+  def cntTypeDoc(cntType: List[Type])(implicit C: LLVMContext): Doc =
+    "void" <+> parens("%Sp," <+> hsep(cntType.map(toDoc(_)), comma)) <> "*"
 
   def freshLocalName(name: String)(implicit C: LLVMContext): String =
     "%" + name + "_" + C.fresh.next().toString()

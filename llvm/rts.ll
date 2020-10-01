@@ -269,108 +269,29 @@ define fastcc void @storeUnit(%Sp* %spp, %Unit %val) alwaysinline {
     ret void
 }
 
-%CntInt = type void (%Sp, %Int)*
+%Cnt = type void (%Sp)*
 
-define fastcc %CntInt @loadCntInt(%Sp* %spp) alwaysinline {
+define fastcc %Cnt @loadCnt(%Sp* %spp) alwaysinline {
     %sp    = load %Sp, %Sp* %spp
 
-    %sptocnt = bitcast %Sp %sp to %CntInt*
-    %newsptocnt = getelementptr %CntInt, %CntInt* %sptocnt, i64 -1
-    %cnt   = load %CntInt, %CntInt* %newsptocnt
-    %newsp = bitcast %CntInt* %newsptocnt to %Sp
+    %sptocnt = bitcast %Sp %sp to %Cnt*
+    %newsptocnt = getelementptr %Cnt, %Cnt* %sptocnt, i64 -1
+    %cnt   = load %Cnt, %Cnt* %newsptocnt
+    %newsp = bitcast %Cnt* %newsptocnt to %Sp
 
     store %Sp %newsp, %Sp* %spp
-    ret %CntInt %cnt
+    ret %Cnt %cnt
 }
 
-define fastcc void @storeCntInt(%Sp* %spp, %CntInt %cnt) alwaysinline {
+define fastcc void @storeCnt(%Sp* %spp, %Cnt %cnt) alwaysinline {
     %sp   = load %Sp, %Sp* %spp
 
-    %sptocnt = bitcast %Sp %sp to %CntInt*
-    store %CntInt %cnt, %CntInt* %sptocnt
-    %newsptocnt = getelementptr %CntInt, %CntInt* %sptocnt, i64 1
-    %newsp = bitcast %CntInt* %newsptocnt to %Sp
+    %sptocnt = bitcast %Sp %sp to %Cnt*
+    store %Cnt %cnt, %Cnt* %sptocnt
+    %newsptocnt = getelementptr %Cnt, %Cnt* %sptocnt, i64 1
+    %newsp = bitcast %Cnt* %newsptocnt to %Sp
 
     store %Sp %newsp, %Sp* %spp
     ret void
 }
-
-%CntBoolean = type void (%Sp, %Boolean)*
-
-define fastcc %CntBoolean @loadCntBoolean(%Sp* %spp) alwaysinline {
-    %sp    = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntBoolean*
-    %newsptocnt = getelementptr %CntBoolean, %CntBoolean* %sptocnt, i64 -1
-    %val   = load %CntBoolean, %CntBoolean* %newsptocnt
-    %newsp = bitcast %CntBoolean* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret %CntBoolean %val
-}
-
-define fastcc void @storeCntBoolean(%Sp* %spp, %CntBoolean %val) alwaysinline {
-    %sp   = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntBoolean*
-    store %CntBoolean %val, %CntBoolean* %sptocnt
-    %newsptocnt = getelementptr %CntBoolean, %CntBoolean* %sptocnt, i64 1
-    %newsp = bitcast %CntBoolean* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret void
-}
-
-%CntUnit = type void (%Sp, %Unit)*
-
-define fastcc %CntUnit @loadCntUnit(%Sp* %spp) alwaysinline {
-    %sp    = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntUnit*
-    %newsptocnt = getelementptr %CntUnit, %CntUnit* %sptocnt, i64 -1
-    %val   = load %CntUnit, %CntUnit* %newsptocnt
-    %newsp = bitcast %CntUnit* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret %CntUnit %val
-}
-
-define fastcc void @storeCntUnit(%Sp* %spp, %CntUnit %val) alwaysinline {
-    %sp   = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntUnit*
-    store %CntUnit %val, %CntUnit* %sptocnt
-    %newsptocnt = getelementptr %CntUnit, %CntUnit* %sptocnt, i64 1
-    %newsp = bitcast %CntUnit* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret void
-}
-
-%CntIntInt = type void (%Sp, %Int, %Int)*
-
-define fastcc %CntIntInt @loadCntIntInt(%Sp* %spp) alwaysinline {
-    %sp    = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntIntInt*
-    %newsptocnt = getelementptr %CntIntInt, %CntIntInt* %sptocnt, i64 -1
-    %cnt   = load %CntIntInt, %CntIntInt* %newsptocnt
-    %newsp = bitcast %CntIntInt* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret %CntIntInt %cnt
-}
-
-define fastcc void @storeCntIntInt(%Sp* %spp, %CntIntInt %cnt) alwaysinline {
-    %sp   = load %Sp, %Sp* %spp
-
-    %sptocnt = bitcast %Sp %sp to %CntIntInt*
-    store %CntIntInt %cnt, %CntIntInt* %sptocnt
-    %newsptocnt = getelementptr %CntIntInt, %CntIntInt* %sptocnt, i64 1
-    %newsp = bitcast %CntIntInt* %newsptocnt to %Sp
-
-    store %Sp %newsp, %Sp* %spp
-    ret void
-}
-
 
