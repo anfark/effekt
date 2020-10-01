@@ -33,10 +33,11 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         // TODO make core.Def always contain BlockSymbol and also the others
         // TODO deal with evidence
         C.localDefsSet = Set();
-        C.blockParamsSet = params.flatMap {
-          case core.BlockParam(name: BlockSymbol) => Some(name)
-          case _ => None
-        }.toSet
+        C.blockParamsSet = Set();
+        params.foreach {
+          case core.BlockParam(name: BlockSymbol) => C.blockParamsSet += name
+          case _ => ()
+        };
         Def(blockName, BlockLit(params.map(transform), transform(body))) ::
           transformToplevel(rest)
       }
@@ -64,11 +65,15 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         )
       case core.Ret(expr) =>
         ANF { transform(expr).map(x => Ret(List(x))) }
-      case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
+      case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, core.BlockLit(params, body)), rest) =>
         // TODO deal with evidence
-        // TODO change block params set for local defs too
         C.localDefsSet += blockName;
-        DefLocal(blockName, transform(block), transform(rest))
+        params.foreach {
+          case core.BlockParam(name: BlockSymbol) => C.blockParamsSet += name
+          case _ => ()
+        };
+        DefLocal(blockName, BlockLit(params.map(transform(_)), transform(body)),
+          transform(rest))
       case core.App(core.ScopeApp(core.BlockVar(name: BlockSymbol), scope), args) =>
         // TODO deal with evidence
         ANF {
@@ -193,7 +198,6 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       val f = FreshBlockSymbol("f", C.module)
       val k = FreshBlockSymbol("k", C.module)
       val u = FreshBlockSymbol("u", C.module)
-      // TODO find actual type of stack
       block match {
         case BlockLit(params, body) =>
           val cntType = params.map(_.typ);

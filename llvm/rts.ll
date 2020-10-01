@@ -295,3 +295,27 @@ define fastcc void @storeCnt(%Sp* %spp, %Cnt %cnt) alwaysinline {
     ret void
 }
 
+define fastcc %Stk @loadStk(%Sp* %spp) alwaysinline {
+    %sp    = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %Stk*
+    %newsptocnt = getelementptr %Stk, %Stk* %sptocnt, i64 -1
+    %cnt   = load %Stk, %Stk* %newsptocnt
+    %newsp = bitcast %Stk* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret %Stk %cnt
+}
+
+define fastcc void @storeStk(%Sp* %spp, %Stk %cnt) alwaysinline {
+    %sp   = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %Stk*
+    store %Stk %cnt, %Stk* %sptocnt
+    %newsptocnt = getelementptr %Stk, %Stk* %sptocnt, i64 1
+    %newsp = bitcast %Stk* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret void
+}
+
