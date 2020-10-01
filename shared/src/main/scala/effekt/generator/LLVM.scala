@@ -171,7 +171,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
         storeCnt("%spp", typ, globalName(blockName)) <@@@>
         toDoc(rest)
     case NewStack(stackName, blockName, args, rest) =>
-      // TODO deal with closed-over values...
+      // TODO deal with closing over boxes....
       // TODO clean up generation
       val tmpSpBefore = freshLocalName("tmpsp");
       val tmpSpp = freshLocalName("tmpspp");
@@ -182,6 +182,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
         tmpSpBefore <+> "=" <+> "extractvalue %Stk" <+> tmpStk <> ", 0" <@>
         tmpSpp <+> "=" <+> "alloca %Sp" <@>
         "store %Sp" <+> tmpSpBefore <+> ", %Sp*" <+> tmpSpp <@>
+        onLines(args.map(store(tmpSpp, _))) <@>
         // TODO find type of stored cnt
         storeCnt(tmpSpp, PrimInt(), globalName(blockName)) <@>
         tmpSpAfter <+> "=" <+> "load %Sp, %Sp*" <+> tmpSpp <@>
