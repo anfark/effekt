@@ -347,4 +347,30 @@ define fastcc void @storeCntUnit(%Sp* %spp, %CntUnit %val) alwaysinline {
     ret void
 }
 
+%CntIntInt = type void (%Sp, %Int, %Int)*
+
+define fastcc %CntIntInt @loadCntIntInt(%Sp* %spp) alwaysinline {
+    %sp    = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %CntIntInt*
+    %newsptocnt = getelementptr %CntIntInt, %CntIntInt* %sptocnt, i64 -1
+    %cnt   = load %CntIntInt, %CntIntInt* %newsptocnt
+    %newsp = bitcast %CntIntInt* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret %CntIntInt %cnt
+}
+
+define fastcc void @storeCntIntInt(%Sp* %spp, %CntIntInt %cnt) alwaysinline {
+    %sp   = load %Sp, %Sp* %spp
+
+    %sptocnt = bitcast %Sp %sp to %CntIntInt*
+    store %CntIntInt %cnt, %CntIntInt* %sptocnt
+    %newsptocnt = getelementptr %CntIntInt, %CntIntInt* %sptocnt, i64 1
+    %newsp = bitcast %CntIntInt* %newsptocnt to %Sp
+
+    store %Sp %newsp, %Sp* %spp
+    ret void
+}
+
 

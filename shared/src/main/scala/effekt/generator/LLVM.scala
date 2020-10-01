@@ -89,37 +89,38 @@ object LLVMPrinter extends ParenPrettyPrinter {
       val (localDefs, entry) = blockFloat(parameterLift(body));
 
       val globalDefinitions = onSeparateLines {
-        findGlobalDefs(body).map { blockName =>
+        findGlobalDefs(body).map {
+          case (blockName, arity) =>
 
-          val blockParams = localDefs(blockName).params;
-          val freshVarNames: List[Var] = blockParams.map { param =>
-            Var(param.typ, FreshValueSymbol(param.id.name.name, C.module))
-          };
-          val freshParamNames = freshVarNames.take(1).map {
-            v => Param(v.typ, v.id)
-          };
+            val blockParams = localDefs(blockName).params;
+            val freshVarNames: List[Var] = blockParams.map { param =>
+              Var(param.typ, FreshValueSymbol(param.id.name.name, C.module))
+            };
+            val freshParamNames = freshVarNames.take(arity).map {
+              v => Param(v.typ, v.id)
+            };
 
-          val entryBlockName: BlockSymbol = FreshBlockSymbol("entry", C.module);
-          val entryBlock = BlockLit(List(), JumpLocal(blockName, freshVarNames));
-          val basicBlocks = reachableBasicBlocks(
-            entryBlockName,
-            localDefs + (entryBlockName -> entryBlock)
-          );
-          val phiInstructionsMap = findPhiInstructions(basicBlocks);
+            val entryBlockName: BlockSymbol = FreshBlockSymbol("entry", C.module);
+            val entryBlock = BlockLit(List(), JumpLocal(blockName, freshVarNames));
+            val basicBlocks = reachableBasicBlocks(
+              entryBlockName,
+              localDefs + (entryBlockName -> entryBlock)
+            );
+            val phiInstructionsMap = findPhiInstructions(basicBlocks);
 
-          define(globalName(blockName), freshParamNames.map(toDoc), {
+            define(globalName(blockName), freshParamNames.map(toDoc), {
 
-            toDoc(JumpLocal(entryBlockName, List())) <@@@>
-              onSeparateLines {
-                basicBlocks.map {
-                  case (blockName, BlockLit(_, blockBody)) =>
-                    toDocBasicBlock(
-                      blockName, blockBody, phiInstructionsMap,
-                      Map(entryBlockName -> freshVarNames.drop(1))
-                    );
+              toDoc(JumpLocal(entryBlockName, List())) <@@@>
+                onSeparateLines {
+                  basicBlocks.map {
+                    case (blockName, BlockLit(_, blockBody)) =>
+                      toDocBasicBlock(
+                        blockName, blockBody, phiInstructionsMap,
+                        Map(entryBlockName -> freshVarNames.drop(arity))
+                      );
+                  }
                 }
-              }
-          })
+            })
         }
       };
 
@@ -585,14 +586,16 @@ object LLVMPrinter extends ParenPrettyPrinter {
     reachableBasicBlocks
   }
 
-  def findGlobalDefs(stmt: Stmt): Set[BlockSymbol] =
+  type Arity = Int
+
+  def findGlobalDefs(stmt: Stmt): Map[BlockSymbol, Arity] =
     stmt match {
       case Let(_, _, rest) =>
         findGlobalDefs(rest)
-      case PushFrame(_, name, _, rest) =>
-        Set(name) ++ findGlobalDefs(rest)
-      case NewStack(_, _, name, _, rest) =>
-        Set(name) ++ findGlobalDefs(rest)
+      case PushFrame(cntType, name, env, rest) =>
+        Map(name -> (cntType.length - env.length)) ++ findGlobalDefs(rest)
+      case NewStack(cntType, _, name, env, rest) =>
+        Map(name -> (cntType.length - env.length)) ++ findGlobalDefs(rest)
       case PushStack(_, rest) =>
         findGlobalDefs(rest)
       case PopStack(_, rest) =>
@@ -600,13 +603,13 @@ object LLVMPrinter extends ParenPrettyPrinter {
       case DefLocal(_, BlockLit(_, body), rest) =>
         findGlobalDefs(body) ++ findGlobalDefs(rest)
       case Ret(_) =>
-        Set()
+        Map()
       case Jump(_, _) =>
-        Set()
+        Map()
       case JumpLocal(_, _) =>
-        Set()
+        Map()
       case If(_, _, _, _, _) =>
-        Set()
+        Map()
     }
 
   /**
