@@ -60,10 +60,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         DefLocal(
           frameName,
           BlockLit(List(transform(core.ValueParam(name))), transform(rest)),
-          Push(transform(C.valueTypeOf(name)), frameName, List(), transform(bind))
+          PushFrame(List(transform(C.valueTypeOf(name))), frameName, List(), transform(bind))
         )
       case core.Ret(expr) =>
-        ANF { transform(expr).map(Ret) }
+        ANF { transform(expr).map(x => Ret(List(x))) }
       case core.Def(blockName: BlockSymbol, core.ScopeAbs(scope, block), rest) =>
         // TODO deal with evidence
         // TODO change block params set for local defs too
@@ -77,15 +77,7 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
               JumpLocal(name, argVals)
             } else {
               if (C.blockParamsSet.contains(name)) {
-                // TODO support multi-parameter function arguments
-                argVals match {
-                  case List(argVal) =>
-                    // TODO find actual type of stack var
-                    PushStack(Var(Stack(PrimInt()), name), Ret(argVal))
-                  case _ =>
-                    println(argVals)
-                    C.abort("unsupported " + argVals)
-                }
+                PushStack(Var(transform(C.blockTypeOf(name)), name), Ret(argVals))
               } else {
                 Jump(name, argVals)
               }
@@ -167,12 +159,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         PrimInt()
       case symbols.BuiltinType(builtins.TBoolean.name, List()) =>
         PrimBoolean()
-      // TODO do we only use this function on parameter types?
-      // TODO generics
-      // TODO parameter sections?
-      // TODO capabilities?
-      case symbols.BlockType(_, List(List(typ)), ret / _) =>
-        Stack(transform(typ))
+      case symbols.BlockType(_, sections, ret / _) =>
+        // TODO do we only use this function on parameter types?
+        // TODO capabilities?
+        Stack(sections.flatten.map(transform(_)))
       case _ =>
         println(typ)
         C.abort("unsupported " + typ)
@@ -206,9 +196,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       // TODO find actual type of stack
       block match {
         case BlockLit(params, body) =>
-          resume.apply(Var(Stack(PrimInt()), k)).map(rest =>
+          val cntType = params.map(_.typ);
+          resume.apply(Var(Stack(cntType), k)).map(rest =>
             DefLocal(f, BlockLit(params, PopStack(u, body)),
-              NewStack(k, f, List(), rest)))
+              NewStack(cntType, k, f, List(), rest)))
       }
     }
 

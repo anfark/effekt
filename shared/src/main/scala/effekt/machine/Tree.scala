@@ -33,12 +33,12 @@ sealed trait Stmt extends Tree
 // Instructions
 case class Let(id: ValueSymbol, bind: Expr, rest: Stmt) extends Stmt
 case class DefLocal(id: BlockSymbol, block: BlockLit, rest: Stmt) extends Stmt
-case class Push(typ: Type, id: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
-case class NewStack(id: BlockSymbol, blockName: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
+case class PushFrame(cntType: List[Type], id: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
+case class NewStack(cntType: List[Type], id: BlockSymbol, blockName: BlockSymbol, args: List[Value], rest: Stmt) extends Stmt
 case class PushStack(stack: Value, rest: Stmt) extends Stmt
 case class PopStack(id: BlockSymbol, rest: Stmt) extends Stmt
 // Terminators
-case class Ret(v: Value) extends Stmt
+case class Ret(values: List[Value]) extends Stmt
 case class Jump(id: BlockSymbol, args: List[Value]) extends Stmt
 case class JumpLocal(id: BlockSymbol, args: List[Value]) extends Stmt
 case class If(cond: Value, thenBlock: BlockSymbol, thenArgs: List[Value], elseBlock: BlockSymbol, elseArgs: List[Value]) extends Stmt
@@ -79,5 +79,5 @@ sealed trait Type extends Tree
 case class PrimUnit() extends Type
 case class PrimInt() extends Type
 case class PrimBoolean() extends Type
-case class Stack(typ: Type) extends Type
+case class Stack(cntType: List[Type]) extends Type
 
