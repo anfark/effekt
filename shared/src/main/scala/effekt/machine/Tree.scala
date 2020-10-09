@@ -62,6 +62,7 @@ sealed trait Value extends Tree
 
 case class IntLit(value: Int) extends Value
 case class BooleanLit(value: Boolean) extends Value
+case class UnitLit() extends Value
 // Refers to values and stack are values
 // TODO Change this symbol back to value symbol.... but what about block parameters?
 case class Var(typ: Type, id: Symbol) extends Value

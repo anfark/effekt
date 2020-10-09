@@ -5,7 +5,7 @@ import scala.collection.mutable
 
 import effekt.context.Context
 import effekt.context.assertions.SymbolAssertions
-import effekt.symbols.{ Symbol, ValueSymbol, BlockSymbol, Name, Module, builtins, / }
+import effekt.symbols.{ Symbol, UserEffect, ValueSymbol, BlockSymbol, Name, Module, builtins, / }
 import effekt.util.{ Task, control }
 import effekt.util.control._
 
@@ -45,6 +45,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         DefPrim(transform(returnTypeOf(blockName)), blockName, params.map(transform), body) :: transformToplevel(rest)
       case core.Include(content, rest) =>
         Include(content) :: transformToplevel(rest)
+      case core.Record(_, _, rest) =>
+        // TODO these are for records and capabilities
+        // TODO We only support singleton capabilities
+        transformToplevel(rest)
       case core.Exports(path, symbols) =>
         List()
       case _ =>
@@ -88,6 +92,14 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
               }
             })
         }
+      case core.App(core.Member(core.ScopeApp(core.BlockVar(name: UserEffect), _), _), args) => {
+        // TODO deal with evidence
+        // TODO merge this with other application case
+        ANF {
+          sequence(args.map(transform)).map(argVals =>
+            PushStack(Var(transform(capabilityTypeOf(name)), name), Ret(argVals)))
+        }
+      }
       case core.If(cond, thenStmt, elseStmt) => {
         val thenBlockName = FreshBlockSymbol("then", C.module);
         C.localDefsSet += thenBlockName;
@@ -96,6 +108,37 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         DefLocal(thenBlockName, BlockLit(List(), transform(thenStmt)),
           DefLocal(elseBlockName, BlockLit(List(), transform(elseStmt)),
             ANF { transform(cond).map(v => If(v, thenBlockName, List(), elseBlockName, List())) }))
+      }
+      case core.Handle(core.ScopeAbs(_, body), handlers) => {
+        // TODO deal with evidence
+        // TODO factor name generation, binding out and use better names
+        val answerType = transform(answerTypeOf(handlers));
+        val retName = FreshBlockSymbol("r", C.module);
+        val parName = FreshValueSymbol("a", C.module);
+        val delName = FreshBlockSymbol("k", C.module);
+        val botName = FreshBlockSymbol("u", C.module);
+        val bodyName = FreshBlockSymbol("body", C.module);
+        C.localDefsSet += retName;
+        C.blockParamsSet += delName;
+        C.blockParamsSet += botName;
+        C.localDefsSet += bodyName;
+        DefLocal(retName, BlockLit(
+          List(Param(answerType, parName)),
+          PopStack(
+            botName,
+            Ret(List(Var(answerType, parName)))
+          )
+        ),
+          NewStack(List(answerType), delName, retName, List(),
+            PushStack(
+              Var(Stack(List(answerType)), delName),
+              DefLocal(bodyName, transform(body),
+                ANF {
+                  sequence(handlers.map(transform).map(bindingStack)).map { args =>
+                    JumpLocal(bodyName, args)
+                  }
+                })
+            )))
       }
       case _ =>
         println(stmt)
@@ -109,6 +152,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         pure(IntLit(value))
       case core.BooleanLit(value) =>
         pure(BooleanLit(value))
+      case core.UnitLit() =>
+        pure(UnitLit())
       case core.ValueVar(name: ValueSymbol) =>
         pure(Var(transform(C.valueTypeOf(name)), name))
       case core.PureApp(core.BlockVar(blockName: BlockSymbol), args) => for {
@@ -124,6 +169,10 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
   def transform(block: core.Block)(implicit C: TransformerContext): BlockLit = {
     block match {
       case core.BlockLit(params, body) =>
+        params.foreach {
+          case core.BlockParam(name: BlockSymbol) => C.blockParamsSet += name
+          case _ => ()
+        };
         BlockLit(params.map(transform), transform(body))
       case _ =>
         println(block)
@@ -135,12 +184,29 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     arg match {
       case expr: core.Expr =>
         transform(expr)
-      case core.ScopeAbs(_, block) =>
+      case core.ScopeAbs(_, block: BlockLit) =>
         // TODO This seems to overlap, move this elsewhere?
         bindingStack(transform(block))
       case _ =>
         println(arg)
         C.abort("unsupported " + arg)
+    }
+  }
+
+  def transform(handler: core.Handler)(implicit C: TransformerContext): BlockLit = {
+    handler match {
+      case core.Handler(_, List((_, core.BlockLit(params :+ resume, body)))) =>
+        // TODO we assume here that resume is the last param
+        // TODO we assume that there are no block params in handlers
+        val resumeName = resume.id.asInstanceOf[BlockSymbol]
+        C.blockParamsSet += resumeName;
+        BlockLit(
+          params.map(transform(_)),
+          PopStack(resumeName, transform(body))
+        )
+      case _ =>
+        println(handler)
+        C.abort("unsupported " + handler)
     }
   }
 
@@ -150,6 +216,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         Param(transform(C.valueTypeOf(name)), name)
       case core.BlockParam(name: BlockSymbol) =>
         Param(transform(C.blockTypeOf(name)), name)
+      case core.BlockParam(name: UserEffect) =>
+        Param(transform(capabilityTypeOf(name)), name)
       case _ =>
         println(param)
         C.abort("unsupported " + param)
@@ -178,6 +246,26 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     C.blockTypeOf(blockName) match {
       case symbols.BlockType(_, _, symbols.Effectful(returnType, _)) => returnType
     }
+
+  def answerTypeOf(handlers: List[core.Handler])(implicit C: TransformerContext): symbols.Type =
+    handlers match {
+      case core.Handler(_, List((_, core.BlockLit(params, _)))) :: _ =>
+        // TODO we assume here that resume is the last param
+        returnTypeOf(params.last.id)
+      case _ =>
+        println(handlers)
+        C.abort("can't find answer type of " + handlers)
+    }
+
+  def capabilityTypeOf(name: UserEffect)(implicit C: TransformerContext): symbols.Type = {
+    name.ops match {
+      case List(op) =>
+        C.blockTypeOf(op)
+      case _ =>
+        println(name.ops)
+        C.abort("unsupported " + name.ops)
+    }
+  }
 
   /**
    * Let insertion

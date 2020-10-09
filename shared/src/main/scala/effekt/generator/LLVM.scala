@@ -221,6 +221,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def toDoc(value: Value)(implicit C: LLVMContext): Doc = value match {
     case IntLit(n)      => n.toString()
     case BooleanLit(b)  => b.toString()
+    case UnitLit()      => 0.toString()
     case Var(typ, name) => localName(name)
   }
 
@@ -231,6 +232,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def valueType(value: Value): Type = value match {
     case IntLit(_)     => PrimInt()
     case BooleanLit(_) => PrimBoolean()
+    case UnitLit()     => PrimUnit()
     case Var(typ, _)   => typ
   }
 
@@ -393,6 +395,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
     case v: Var        => Set(v)
     case i: IntLit     => Set()
     case b: BooleanLit => Set()
+    case u: UnitLit    => Set()
   }
 
   def substitute(mapping: Map[Symbol, Value], stmt: Stmt): Stmt = stmt match {
@@ -431,6 +434,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
   def substitute(mapping: Map[Symbol, Value], value: Value): Value = value match {
     case IntLit(n)      => IntLit(n)
     case BooleanLit(b)  => BooleanLit(b)
+    case UnitLit()      => UnitLit()
     case Var(typ, name) => mapping.getOrElse(name, Var(typ, name))
   }
 
