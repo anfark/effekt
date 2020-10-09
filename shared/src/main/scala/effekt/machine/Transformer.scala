@@ -182,6 +182,8 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
       case core.ScopeAbs(_, block: BlockLit) =>
         // TODO This seems to overlap, move this elsewhere?
         bindingStack(transform(block))
+      case core.BlockVar(name: UserEffect) =>
+        pure(Var(transform(capabilityTypeOf(name)), name))
       case _ =>
         println(arg)
         C.abort("unsupported " + arg)
