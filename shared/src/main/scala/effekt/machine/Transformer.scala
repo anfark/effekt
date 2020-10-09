@@ -116,18 +116,13 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
         val retName = FreshBlockSymbol("r", C.module);
         val parName = FreshValueSymbol("a", C.module);
         val delName = FreshBlockSymbol("k", C.module);
-        val botName = FreshBlockSymbol("u", C.module);
         val bodyName = FreshBlockSymbol("body", C.module);
         C.localDefsSet += retName;
         C.blockParamsSet += delName;
-        C.blockParamsSet += botName;
         C.localDefsSet += bodyName;
         DefLocal(retName, BlockLit(
           List(Param(answerType, parName)),
-          PopStack(
-            botName,
-            Ret(List(Var(answerType, parName)))
-          )
+          Ret(List(Var(answerType, parName)))
         ),
           NewStack(List(answerType), delName, retName, List(),
             PushStack(
@@ -285,12 +280,12 @@ class Transformer extends Phase[core.ModuleDecl, machine.ModuleDecl] {
     control.use(delimiter) { resume =>
       val f = FreshBlockSymbol("f", C.module)
       val k = FreshBlockSymbol("k", C.module)
-      val u = FreshBlockSymbol("u", C.module)
+      // TODO add to localDefsSet and blockParamsSet?
       block match {
         case BlockLit(params, body) =>
           val cntType = params.map(_.typ);
           resume.apply(Var(Stack(cntType), k)).map(rest =>
-            DefLocal(f, BlockLit(params, PopStack(u, body)),
+            DefLocal(f, BlockLit(params, body),
               NewStack(cntType, k, f, List(), rest)))
       }
     }

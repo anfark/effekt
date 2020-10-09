@@ -90,7 +90,7 @@ object LLVMPrinter extends ParenPrettyPrinter {
 
       val globalDefinitions = onSeparateLines {
         findGlobalDefs(body).map {
-          case (blockName, arity) =>
+          case (blockName, (arity, underflow)) =>
 
             val blockParams = localDefs(blockName).params;
             val freshVarNames: List[Var] = blockParams.map { param =>
@@ -107,10 +107,19 @@ object LLVMPrinter extends ParenPrettyPrinter {
               localDefs + (entryBlockName -> entryBlock)
             );
             val phiInstructionsMap = findPhiInstructions(basicBlocks);
+            val underflowStackName = FreshBlockSymbol("unused", C.module);
+            val underflowDoc = if (underflow) {
+              localName(underflowStackName) <+> "=" <+>
+                "call fastcc %Stk" <+> globalBuiltin("popStack") <>
+                argumentList(List("%Sp* %spp"))
+              // TODO erase stack
+            } else {
+              emptyDoc
+            }
 
             define(globalName(blockName), freshParamNames.map(toDoc), {
-
-              toDoc(JumpLocal(entryBlockName, List())) <@@@>
+              underflowDoc <@@@>
+                toDoc(JumpLocal(entryBlockName, List())) <@@@>
                 onSeparateLines {
                   basicBlocks.map {
                     case (blockName, BlockLit(_, blockBody)) =>
@@ -603,15 +612,16 @@ object LLVMPrinter extends ParenPrettyPrinter {
   }
 
   type Arity = Int
+  type Underflow = Boolean
 
-  def findGlobalDefs(stmt: Stmt): Map[BlockSymbol, Arity] =
+  def findGlobalDefs(stmt: Stmt): Map[BlockSymbol, (Arity, Underflow)] =
     stmt match {
       case Let(_, _, rest) =>
         findGlobalDefs(rest)
       case PushFrame(cntType, name, env, rest) =>
-        Map(name -> (cntType.length - env.length)) ++ findGlobalDefs(rest)
+        Map(name -> (cntType.length - env.length, false)) ++ findGlobalDefs(rest)
       case NewStack(cntType, _, name, env, rest) =>
-        Map(name -> (cntType.length - env.length)) ++ findGlobalDefs(rest)
+        Map(name -> (cntType.length - env.length, true)) ++ findGlobalDefs(rest)
       case PushStack(_, rest) =>
         findGlobalDefs(rest)
       case PopStack(_, rest) =>
